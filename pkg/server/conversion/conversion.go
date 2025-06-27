@@ -18,7 +18,6 @@ package conversion
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -186,16 +185,14 @@ func ProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList)
 type ObjectMetadata metav1.ObjectMeta
 
 // NewObjectMetadata requests the bare minimum to build an object metadata object.
-func NewObjectMetadata(metadata *openapi.ResourceWriteMetadata, namespace, actor string) *ObjectMetadata {
+func NewObjectMetadata(metadata *openapi.ResourceWriteMetadata, namespace string) *ObjectMetadata {
 	o := &ObjectMetadata{
 		Namespace: namespace,
 		Name:      util.GenerateResourceID(),
 		Labels: map[string]string{
 			constants.NameLabel: metadata.Name,
 		},
-		Annotations: map[string]string{
-			constants.CreatorAnnotation: actor,
-		},
+		Annotations: map[string]string{},
 	}
 
 	if metadata.Description != nil {
@@ -231,39 +228,25 @@ func (o *ObjectMetadata) Get() metav1.ObjectMeta {
 	return metav1.ObjectMeta(*o)
 }
 
+// MetadataMutationFunc is used to mutate metadata on update.
+type MetadataMutationFunc func(required, current metav1.Object) error
+
 // UpdateObjectMetadata abstracts away metadata updates.
-func UpdateObjectMetadata(required, current metav1.Object, requiredAnnotations, optionalAnnotations []string) error {
+func UpdateObjectMetadata(required, current metav1.Object, mutators ...MetadataMutationFunc) error {
 	req := required.GetAnnotations()
-	cur := current.GetAnnotations()
-
-	// Persist any component specific annotations.
-	for _, annotation := range requiredAnnotations {
-		v, ok := cur[annotation]
-		if !ok {
-			return fmt.Errorf("%w: %s", ErrAnnotation, annotation)
-		}
-
-		req[annotation] = v
+	if req == nil {
+		req = map[string]string{}
 	}
 
-	for _, annotation := range optionalAnnotations {
-		if v, ok := cur[annotation]; ok {
-			req[annotation] = v
-		}
-	}
-
-	// When updating, the required creator is now the updater.
-	req[constants.ModifierAnnotation] = req[constants.CreatorAnnotation]
 	req[constants.ModifiedTimestampAnnotation] = time.Now().UTC().Format(time.RFC3339)
 
-	// And preserve the original creator.
-	req[constants.CreatorAnnotation] = cur[constants.CreatorAnnotation]
-
-	if v, ok := cur[constants.CreatorAnnotation]; ok {
-		req[constants.CreatorAnnotation] = v
-	}
-
 	required.SetAnnotations(req)
+
+	for _, m := range mutators {
+		if err := m(required, current); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
