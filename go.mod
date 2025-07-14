@@ -6,7 +6,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/brunoga/deep v1.2.4
 	github.com/getkin/kin-openapi v0.132.0
-	github.com/go-jose/go-jose/v4 v4.0.4
+	github.com/go-jose/go-jose/v4 v4.0.5
 	github.com/go-logr/logr v1.4.2
 	github.com/go-openapi/jsonpointer v0.21.1
 	github.com/spf13/pflag v1.0.6
