@@ -25,7 +25,7 @@ const (
 	// This is the default version in the Makefile.
 	DeveloperVersion = "0.0.0"
 
-	// PrincipalFrefix is a prefix that is applied to labels and annotations
+	// PrincipalPrefix is a prefix that is applied to labels and annotations
 	// that extend availabile identity information.  Resources may have metadata,
 	// like organization and project scoping, and this is always set to either the user,
 	// that directly created it, or the service that created it acting on the user's
