@@ -17,54 +17,23 @@ limitations under the License.
 package middleware
 
 import (
-	"bytes"
 	"net/http"
 )
 
-// LoggingResponseWriter is the ubiquitous reimplementation of a response
-// writer that allows access to the HTTP status code in middleware.
+// LoggingResponseWriter wraps a ResponseWriter in such a way that the response status code, body and headers can
+// be examined after its been used to serve a response. This is deprecated: use Capture.Wrap(w) instead, because
+// it wraps the ResponseWriter such that additional interfaces (e.g., io.ReaderFrom) that may be present on the
+// supplied ResponseWriter are still supported in the wrapper.
 type LoggingResponseWriter struct {
-	next http.ResponseWriter
-	code int
-	body *bytes.Buffer
+	http.ResponseWriter
+	*Capture
 }
 
 func NewLoggingResponseWriter(next http.ResponseWriter) *LoggingResponseWriter {
+	capture := NewCapture()
+
 	return &LoggingResponseWriter{
-		next: next,
+		Capture:        capture,
+		ResponseWriter: capture.Wrap(next),
 	}
-}
-
-// Check the correct interface is implmented.
-var _ http.ResponseWriter = &LoggingResponseWriter{}
-
-func (w *LoggingResponseWriter) Header() http.Header {
-	return w.next.Header()
-}
-
-func (w *LoggingResponseWriter) Write(body []byte) (int, error) {
-	if w.body == nil {
-		w.body = &bytes.Buffer{}
-	}
-
-	w.body.Write(body)
-
-	return w.next.Write(body)
-}
-
-func (w *LoggingResponseWriter) WriteHeader(statusCode int) {
-	w.code = statusCode
-	w.next.WriteHeader(statusCode)
-}
-
-func (w *LoggingResponseWriter) StatusCode() int {
-	if w.code == 0 {
-		return http.StatusOK
-	}
-
-	return w.code
-}
-
-func (w *LoggingResponseWriter) Body() *bytes.Buffer {
-	return w.body
 }
