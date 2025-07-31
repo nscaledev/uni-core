@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/felixge/httpsnoop"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -31,8 +32,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.22.0"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/unikorn-cloud/core/pkg/server/middleware"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -201,17 +200,11 @@ func httpRequestAttributes(r *http.Request) []attribute.KeyValue {
 	return attr
 }
 
-func httpResponseAttributes(w *middleware.LoggingResponseWriter) []attribute.KeyValue {
-	var bodySize int
-
-	if body := w.Body(); body != nil {
-		bodySize = body.Len()
-	}
-
+func httpResponseAttributes(m httpsnoop.Metrics, w http.ResponseWriter) []attribute.KeyValue {
 	var attr []attribute.KeyValue
 
-	attr = append(attr, semconv.HTTPResponseStatusCode(w.StatusCode()))
-	attr = append(attr, semconv.HTTPResponseBodySize(bodySize))
+	attr = append(attr, semconv.HTTPResponseStatusCode(m.Code))
+	attr = append(attr, semconv.HTTPResponseBodySize(int(m.Written)))
 	attr = append(attr, httpHeaderAttributes(w.Header(), "http.response.header")...)
 
 	return attr
@@ -255,13 +248,11 @@ func Middleware(serviceName, version string) func(next http.Handler) http.Handle
 			// Create a new request with any contextual information the tracer has added.
 			request := r.WithContext(ctx)
 
-			writer := middleware.NewLoggingResponseWriter(w)
-
-			next.ServeHTTP(writer, request)
+			metrics := httpsnoop.CaptureMetrics(next, w, request)
 
 			// Extract HTTP response information for logging purposes.
-			span.SetAttributes(httpResponseAttributes(writer)...)
-			span.SetStatus(httpStatusToOtelCode(writer.StatusCode()))
+			span.SetAttributes(httpResponseAttributes(metrics, w)...)
+			span.SetStatus(httpStatusToOtelCode(metrics.Code))
 		})
 	}
 }
