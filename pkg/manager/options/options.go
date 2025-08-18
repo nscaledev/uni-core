@@ -18,6 +18,8 @@ limitations under the License.
 package options
 
 import (
+	"runtime"
+
 	"github.com/spf13/pflag"
 
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -42,6 +44,6 @@ func (o *Options) AddFlags(flags *pflag.FlagSet) {
 	o.CDDriver.Kind = cd.DriverKindArgoCD
 
 	flags.StringVar(&o.Namespace, "namespace", "", "Namespace the process is running in")
-	flags.IntVar(&o.MaxConcurrentReconciles, "max-concurrency", 16, "Maximum number of requests to process at the same time")
+	flags.IntVar(&o.MaxConcurrentReconciles, "max-concurrency", runtime.NumCPU(), "Maximum number of requests to process at the same time")
 	flags.Var(&o.CDDriver, "cd-driver", "CD backend driver to use from [argocd]")
 }
