@@ -109,3 +109,16 @@ func (t TagList) ContainsAll(o TagList) bool {
 
 	return true
 }
+
+func (t TagList) Find(name string) (string, bool) {
+	predicate := func(tag Tag) bool {
+		return tag.Name == name
+	}
+
+	index := slices.IndexFunc(t, predicate)
+	if index < 0 {
+		return "", false
+	}
+
+	return t[index].Value, true
+}
