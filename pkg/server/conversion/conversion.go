@@ -17,6 +17,7 @@ limitations under the License.
 package conversion
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -134,49 +135,41 @@ func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.Reso
 
 // OrganizationScopedResourceReadMetadata extracts organization scoped metdata from a resource
 // for GET APIS.
+//
+//nolint:errchkjson
 func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.OrganizationScopedResourceReadMetadata {
-	labels := in.GetLabels()
-
 	temp := ResourceReadMetadata(in, tags)
 
+	tempJSON, _ := json.Marshal(temp)
+
+	labels := in.GetLabels()
+
 	out := openapi.OrganizationScopedResourceReadMetadata{
-		Id:                 temp.Id,
-		Name:               temp.Name,
-		Description:        temp.Description,
-		CreatedBy:          temp.CreatedBy,
-		CreationTime:       temp.CreationTime,
-		ModifiedBy:         temp.ModifiedBy,
-		ModifiedTime:       temp.ModifiedTime,
-		ProvisioningStatus: temp.ProvisioningStatus,
-		HealthStatus:       temp.HealthStatus,
-		Tags:               temp.Tags,
-		OrganizationId:     labels[constants.OrganizationLabel],
+		OrganizationId: labels[constants.OrganizationLabel],
 	}
+
+	_ = json.Unmarshal(tempJSON, &out)
 
 	return out
 }
 
 // ProjectScopedResourceReadMetadata extracts project scoped metdata from a resource for
 // GET APIs.
+//
+//nolint:errchkjson
 func ProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.ProjectScopedResourceReadMetadata {
+	temp := ResourceReadMetadata(in, tags)
+
+	tempJSON, _ := json.Marshal(temp)
+
 	labels := in.GetLabels()
 
-	temp := OrganizationScopedResourceReadMetadata(in, tags)
-
 	out := openapi.ProjectScopedResourceReadMetadata{
-		Id:                 temp.Id,
-		Name:               temp.Name,
-		Description:        temp.Description,
-		CreatedBy:          temp.CreatedBy,
-		CreationTime:       temp.CreationTime,
-		ModifiedBy:         temp.ModifiedBy,
-		ModifiedTime:       temp.ModifiedTime,
-		ProvisioningStatus: temp.ProvisioningStatus,
-		HealthStatus:       temp.HealthStatus,
-		Tags:               temp.Tags,
-		OrganizationId:     temp.OrganizationId,
-		ProjectId:          labels[constants.ProjectLabel],
+		OrganizationId: labels[constants.OrganizationLabel],
+		ProjectId:      labels[constants.ProjectLabel],
 	}
+
+	_ = json.Unmarshal(tempJSON, &out)
 
 	return out
 }
