@@ -66,7 +66,7 @@ type ControllerFactory interface {
 	// Upgrade allows version based upgrades of managed resources.
 	// DO NOT MODIFY THE SPEC EVER.  Only things like metadata can
 	// be touched.
-	Upgrade(client client.Client) error
+	Upgrade(ctx context.Context, cli client.Client, options *options.Options) error
 
 	// Schemes allows controllers to add types to the client beyond
 	// the defaults defined in this repository.
@@ -125,13 +125,15 @@ func getController(o *options.Options, controllerOptions ControllerOptions, mana
 	return c, nil
 }
 
-func doUpgrade(f ControllerFactory) error {
-	client, err := coreclient.New(context.TODO())
+func doUpgrade(f ControllerFactory, options *options.Options) error {
+	ctx := context.TODO()
+
+	client, err := coreclient.New(ctx, f.Schemes()...)
 	if err != nil {
 		return err
 	}
 
-	if err := f.Upgrade(client); err != nil {
+	if err := f.Upgrade(ctx, client, options); err != nil {
 		return err
 	}
 
@@ -175,7 +177,7 @@ func Run(f ControllerFactory) {
 		os.Exit(1)
 	}
 
-	if err := doUpgrade(f); err != nil {
+	if err := doUpgrade(f, o); err != nil {
 		logger.Error(err, "resource upgrade failed")
 		os.Exit(1)
 	}
