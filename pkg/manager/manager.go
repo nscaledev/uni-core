@@ -63,14 +63,19 @@ type ControllerFactory interface {
 	// RegisterWatches adds any watches that would trigger a reconcile.
 	RegisterWatches(manager manager.Manager, controller controller.Controller) error
 
-	// Upgrade allows version based upgrades of managed resources.
-	// DO NOT MODIFY THE SPEC EVER.  Only things like metadata can
-	// be touched.
-	Upgrade(ctx context.Context, cli client.Client, options *options.Options) error
-
 	// Schemes allows controllers to add types to the client beyond
 	// the defaults defined in this repository.
 	Schemes() []coreclient.SchemeAdder
+}
+
+// ControllerUpgrader optionally allows the factory to define an upgrade procedure.
+// DO NOT MODIFY THE SPEC EVER, you have CRD defaulting to fill in any blanks.
+// Only things like metadata can be touched, or the resources can be moved around.
+// Typically you would want to attach a controller version annotation to define what
+// API the resource is using, then drive upgrades based on that.
+type ControllerUpgrader interface {
+	// Upgrade allows version based upgrades of managed resources.
+	Upgrade(ctx context.Context, cli client.Client, options *options.Options) error
 }
 
 // getManager returns a generic manager.
@@ -125,16 +130,19 @@ func getController(o *options.Options, controllerOptions ControllerOptions, mana
 	return c, nil
 }
 
+// doUpgrade allows a controller to optionally define an online upgrade procedure.
 func doUpgrade(f ControllerFactory, options *options.Options) error {
-	ctx := context.TODO()
+	if upgrader, ok := f.(ControllerUpgrader); ok {
+		ctx := context.TODO()
 
-	client, err := coreclient.New(ctx, f.Schemes()...)
-	if err != nil {
-		return err
-	}
+		client, err := coreclient.New(ctx, f.Schemes()...)
+		if err != nil {
+			return err
+		}
 
-	if err := f.Upgrade(ctx, client, options); err != nil {
-		return err
+		if err := upgrader.Upgrade(ctx, client, options); err != nil {
+			return err
+		}
 	}
 
 	return nil
