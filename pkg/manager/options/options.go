@@ -25,10 +25,19 @@ import (
 	"github.com/unikorn-cloud/core/pkg/cd"
 )
 
-// Options defines common controller options.
-type Options struct {
+// BaseOptions are things all controllers, message consumers and servers will need.
+type BaseOptions struct {
 	// Namespace is the namespace we are running in.
 	Namespace string
+}
+
+func (o *BaseOptions) AddFlags(flags *pflag.FlagSet) {
+	flags.StringVar(&o.Namespace, "namespace", "", "Namespace the process is running in")
+}
+
+// Options defines common controller options.
+type Options struct {
+	BaseOptions
 
 	// MaxConcurrentReconciles allows requests to be processed
 	// concurrently.  Be warned, this will inrcrease memory utilization
@@ -43,7 +52,8 @@ type Options struct {
 func (o *Options) AddFlags(flags *pflag.FlagSet) {
 	o.CDDriver.Kind = cd.DriverKindArgoCD
 
-	flags.StringVar(&o.Namespace, "namespace", "", "Namespace the process is running in")
+	o.BaseOptions.AddFlags(flags)
+
 	flags.IntVar(&o.MaxConcurrentReconciles, "max-concurrency", runtime.NumCPU(), "Maximum number of requests to process at the same time")
 	flags.Var(&o.CDDriver, "cd-driver", "CD backend driver to use from [argocd]")
 }

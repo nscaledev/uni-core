@@ -37,7 +37,7 @@ var (
 )
 
 func GetResourceNamespace(ctx context.Context, l labels.Set) (*corev1.Namespace, error) {
-	c, err := clientlib.ProvisionerClientFromContext(ctx)
+	c, err := clientlib.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

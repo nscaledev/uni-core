@@ -61,11 +61,11 @@ const (
 	namespaceKey
 )
 
-func NewContextWithProvisionerClient(ctx context.Context, client client.Client) context.Context {
+func NewContext(ctx context.Context, client client.Client) context.Context {
 	return context.WithValue(ctx, provisionerClientKey, client)
 }
 
-func ProvisionerClientFromContext(ctx context.Context) (client.Client, error) {
+func FromContext(ctx context.Context) (client.Client, error) {
 	if value := ctx.Value(provisionerClientKey); value != nil {
 		if client, ok := value.(client.Client); ok {
 			return client, nil

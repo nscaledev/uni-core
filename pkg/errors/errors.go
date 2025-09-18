@@ -49,4 +49,7 @@ var (
 	// ErrKey is returned when a required map key is not defined.  This is typically
 	// used when a data key in a secret is required, but missing.
 	ErrKey = errors.New("key error")
+
+	// ErrTypeConversion is thrown when a type assertion goes wrong.
+	ErrTypeConversion = errors.New("type conversion error")
 )
