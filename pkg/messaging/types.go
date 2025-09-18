@@ -13,3 +13,19 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
+package messaging
+
+import (
+	"time"
+)
+
+// Envelope is a generic messaging envelope for resource messages.
+type Envelope struct {
+	// ResourceID the GUID of a resource.
+	ResourceID string
+	// DeletionTimestamp describes whether the resource is being deleted
+	// or not, and is used for routing.  If not set this is a creation or
+	// update event.
+	DeletionTimestamp *time.Time
+}
