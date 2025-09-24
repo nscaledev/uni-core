@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -110,7 +111,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	// The static client is used by the application provisioner to get access to
 	// application bundles and definitions regardless of remote cluster scoping etc.
-	ctx = client.NewContextWithProvisionerClient(ctx, r.manager.GetClient())
+	ctx = client.NewContext(ctx, r.manager.GetClient())
 
 	// The cluster context is updated as remote clusters are descended into.
 	clusterContext := &client.ClusterContext{
@@ -162,9 +163,41 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return r.reconcileNormal(ctx, provisioner, object)
 }
 
+// hasExternalReferences tells us if we have any external finalizers on our object
+// above and beyond the default one.
+func hasExternalReferences(object unikornv1.ManagableResourceInterface) bool {
+	discard := func(s string) bool {
+		return s == constants.Finalizer
+	}
+
+	return len(slices.DeleteFunc(slices.Clone(object.GetFinalizers()), discard)) != 0
+}
+
 // reconcileDelete handles object deletion.
 func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
+
+	// Resources from one service can inhibit the deletion of those in others to
+	// enforce deletion ordering.  This is especially relevant for cascading deletion
+	// of CAPO Kubernetes clusters via the underlying network...  Deletion of the
+	// network will actually trigger deletion of the underlying cloud identity.
+	// Identity deletion will trigger network deletion, and block until that's done.
+	// Network deletion will trigger cluster deletion (via an event).  If the identity
+	// was deleted before the cluster had finished with it there's a very real possibility
+	// of errors being displayed to users, hangs (because OpenStack will happily delete a
+	// project with compute and network resources still using it, which will get orhpaned
+	// and cannot be deleted via non-admin means), or more insiduosly resource leaks.
+	if hasExternalReferences(object) {
+		log.Info("awaiting resource users to release references")
+
+		// Still want it to report as deprovisioning.
+		// TODO: perhaps a blocked state would be useful??
+		if err := r.handleReconcileCondition(ctx, object, provisioners.ErrYield, true); err != nil {
+			return reconcile.Result{}, err
+		}
+
+		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+	}
 
 	perr := provisioner.Deprovision(ctx)
 

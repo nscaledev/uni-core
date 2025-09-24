@@ -162,7 +162,7 @@ func TestApplicationCreateHelm(t *testing.T) {
 
 	ctx := t.Context()
 	ctx = coreclient.NewContextWithNamespace(ctx, baseNamespace)
-	ctx = coreclient.NewContextWithProvisionerClient(ctx, tc.client)
+	ctx = coreclient.NewContext(ctx, tc.client)
 	ctx = coreclient.NewContextWithCluster(ctx, clusterContext)
 	ctx = cd.NewContext(ctx, driver)
 	ctx = application.NewContext(ctx, owner)
@@ -268,7 +268,7 @@ func TestApplicationCreateHelmExtended(t *testing.T) {
 
 	ctx := t.Context()
 	ctx = coreclient.NewContextWithNamespace(ctx, baseNamespace)
-	ctx = coreclient.NewContextWithProvisionerClient(ctx, tc.client)
+	ctx = coreclient.NewContext(ctx, tc.client)
 	ctx = coreclient.NewContextWithCluster(ctx, clusterContext)
 	ctx = cd.NewContext(ctx, driver)
 	ctx = application.NewContext(ctx, owner)
@@ -336,7 +336,7 @@ func TestApplicationCreateGit(t *testing.T) {
 
 	ctx := t.Context()
 	ctx = coreclient.NewContextWithNamespace(ctx, baseNamespace)
-	ctx = coreclient.NewContextWithProvisionerClient(ctx, tc.client)
+	ctx = coreclient.NewContext(ctx, tc.client)
 	ctx = coreclient.NewContextWithCluster(ctx, clusterContext)
 	ctx = cd.NewContext(ctx, driver)
 	ctx = application.NewContext(ctx, owner)
@@ -498,7 +498,7 @@ func TestApplicationCreateMutate(t *testing.T) {
 
 	ctx := t.Context()
 	ctx = coreclient.NewContextWithNamespace(ctx, baseNamespace)
-	ctx = coreclient.NewContextWithProvisionerClient(ctx, tc.client)
+	ctx = coreclient.NewContext(ctx, tc.client)
 	ctx = coreclient.NewContextWithCluster(ctx, clusterContext)
 	ctx = cd.NewContext(ctx, driver)
 	ctx = application.NewContext(ctx, owner)
@@ -553,7 +553,7 @@ func TestApplicationDeleteNotFound(t *testing.T) {
 
 	ctx := t.Context()
 	ctx = coreclient.NewContextWithNamespace(ctx, baseNamespace)
-	ctx = coreclient.NewContextWithProvisionerClient(ctx, tc.client)
+	ctx = coreclient.NewContext(ctx, tc.client)
 	ctx = cd.NewContext(ctx, driver)
 	ctx = application.NewContext(ctx, owner)
 
