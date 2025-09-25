@@ -17,16 +17,23 @@ limitations under the License.
 package manager
 
 import (
+	"context"
 	"fmt"
+	"slices"
 
+	"github.com/unikorn-cloud/core/pkg/constants"
 	"github.com/unikorn-cloud/core/pkg/errors"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// GetResourceReference takes a resource and generates a unique reference for use with
+// GenerateResourceReference takes a resource and generates a unique reference for use with
 // blocking deletion.
-func GetResourceReference(client client.Client, resource client.Object) (string, error) {
+func GenerateResourceReference(client client.Client, resource client.Object) (string, error) {
 	gvks, _, err := client.Scheme().ObjectKinds(resource)
 	if err != nil {
 		return "", err
@@ -53,4 +60,46 @@ func GetResourceReference(client client.Client, resource client.Object) (string,
 	}
 
 	return fmt.Sprintf("%s.%s/%s", gvr.Resource, gvr.Group, resource.GetName()), nil
+}
+
+// GetResourceReferences returns all resource references attached to a resource.
+// This is used primarily to poll a resource to see if it's in use, and thus its
+// deletion will have consequences.  It may also be used to inhibit deletion in
+// certain cercumstances.
+func GetResourceReferences(object client.Object) []string {
+	discard := func(s string) bool {
+		return s == constants.Finalizer
+	}
+
+	return slices.DeleteFunc(slices.Clone(object.GetFinalizers()), discard)
+}
+
+// hasExternalReferences tells us if we have any external finalizers on our object
+// above and beyond the default one.
+func hasExternalReferences(object client.Object) bool {
+	return len(GetResourceReferences(object)) != 0
+}
+
+// ClearResourceReferences is used by controllers whose object may reference one of
+// many other resources e.g. a server can reference multiple security groups.  This
+// is used to clean them out during the finalizing phase of deletion.
+func ClearResourceReferences(ctx context.Context, cli client.Client, resources client.ObjectList, options *client.ListOptions, reference string) error {
+	if err := cli.List(ctx, resources, options); err != nil {
+		return err
+	}
+
+	callback := func(resource runtime.Object) error {
+		object, ok := resource.(client.Object)
+		if !ok {
+			return fmt.Errorf("%w: resource not a client object", errors.ErrTypeConversion)
+		}
+
+		if updated := controllerutil.RemoveFinalizer(object, reference); !updated {
+			return nil
+		}
+
+		return cli.Update(ctx, object)
+	}
+
+	return meta.EachListItem(resources, callback)
 }

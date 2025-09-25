@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -161,16 +160,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	log.Info("reconciling object")
 
 	return r.reconcileNormal(ctx, provisioner, object)
-}
-
-// hasExternalReferences tells us if we have any external finalizers on our object
-// above and beyond the default one.
-func hasExternalReferences(object unikornv1.ManagableResourceInterface) bool {
-	discard := func(s string) bool {
-		return s == constants.Finalizer
-	}
-
-	return len(slices.DeleteFunc(slices.Clone(object.GetFinalizers()), discard)) != 0
 }
 
 // reconcileDelete handles object deletion.
