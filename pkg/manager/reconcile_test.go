@@ -503,7 +503,7 @@ func TestReconcileDeleteCancelled(t *testing.T) {
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
 
 	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
+	assert.Error(t, err)
 
 	// Does the resource still exist in Kubernetes?
 	var result unikornv1fake.ManagedResource
@@ -544,7 +544,7 @@ func TestReconcileDeleteError(t *testing.T) {
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
 
 	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
+	assert.Error(t, err)
 
 	// Does the resource still exist in Kubernetes?
 	var result unikornv1fake.ManagedResource
