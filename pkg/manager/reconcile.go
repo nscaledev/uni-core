@@ -164,59 +164,53 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 }
 
 // reconcileDelete handles object deletion.
+// In the Deleting phase we wait for any references or dependencies to be cleaned.
+// In the Draining phase we hand off to the provision to clean up any resources.
+// In the Finalizing phase we remove our finalizer to allow deletion.
 func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
 
-	// Wait for any owned resources to be cleaned up first.
-	if controllerutil.ContainsFinalizer(object, metav1.FinalizerDeleteDependents) {
-		log.Info("awaiting owned resource deletion")
+	references := GetResourceReferences(object)
 
-		// Still want it to report as deprovisioning.
-		// TODO: perhaps a blocked state would be useful??
-		if err := r.handleReconcileCondition(ctx, object, provisioners.ErrYield, true); err != nil {
-			return reconcile.Result{}, err
-		}
+	var perr error
 
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
-	}
-
+	switch {
 	// Resources from one service can inhibit the deletion of those in others to
-	// enforce deletion ordering.  This is especially relevant for cascading deletion
-	// of CAPO Kubernetes clusters via the underlying network...  Deletion of the
-	// network will actually trigger deletion of the underlying cloud identity.
-	// Identity deletion will trigger network deletion, and block until that's done.
-	// Network deletion will trigger cluster deletion (via an event).  If the identity
-	// was deleted before the cluster had finished with it there's a very real possibility
-	// of errors being displayed to users, hangs (because OpenStack will happily delete a
-	// project with compute and network resources still using it, which will get orhpaned
-	// and cannot be deleted via non-admin means), or more insiduosly resource leaks.
-	if references := GetResourceReferences(object); len(references) > 0 {
+	// enforce deletion ordering, for example a cluster can prevent project deletion
+	// until it's done cleanup.
+	case len(references) > 0:
 		log.Info("awaiting resource reference deletion", "references", references)
 
-		// Still want it to report as deprovisioning.
-		// TODO: perhaps a blocked state would be useful??
-		if err := r.handleReconcileCondition(ctx, object, provisioners.ErrYield, true); err != nil {
-			return reconcile.Result{}, err
-		}
+		perr = provisioners.ErrYield
+	// Wait for any owned resources to be cleaned up first.
+	case controllerutil.ContainsFinalizer(object, metav1.FinalizerDeleteDependents):
+		log.Info("awaiting owned resource deletion")
 
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		perr = provisioners.ErrYield
+	default:
+		perr = provisioner.Deprovision(ctx)
 	}
 
-	perr := provisioner.Deprovision(ctx)
-
+	// Always update the condition, this may fail if someone has poked the resource
+	// e.g, added a finalizer, then just requeue, no need for an error.
 	if err := r.handleReconcileCondition(ctx, object, perr, true); err != nil {
-		return reconcile.Result{}, err
+		log.Info("failed to update status, enqueuing retry")
+
+		//nolint:nilerr
+		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}
 
 	// If anything went wrong, requeue for another attempt.
-	// NOTE: DO NOT return an error, and use a constant period or you will
-	// suffer from an exponential back-off and kill performance.
+	// Errors here actually mean something, a yield means it'll sort itself out
+	// via eventual consistency, we expect everything to be handled gracefully.
 	if perr != nil {
 		if !errors.Is(perr, provisioners.ErrYield) {
-			log.Error(perr, "deprovisioning failed unexpectedly")
+			// This will result in an exponential backoff, so you want
+			// to avoid it!
+			return reconcile.Result{}, perr
 		}
 
-		log.Info("controller yielding", "message", perr.Error())
+		log.Info("controller yielding", "message", perr)
 
 		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}
@@ -224,9 +218,13 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 	// All good, signal the resource can be deleted.
 	if ok := controllerutil.RemoveFinalizer(object, constants.Finalizer); ok {
 		if err := r.manager.GetClient().Update(ctx, object); err != nil {
-			return reconcile.Result{}, err
+			log.Info("failed to remove finalizer", "error", err)
+
+			return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 		}
 	}
+
+	log.Info("deletion complete")
 
 	return reconcile.Result{}, nil
 }
@@ -260,6 +258,8 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}
+
+	log.Info("reconcile complete")
 
 	return reconcile.Result{}, nil
 }
