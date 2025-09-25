@@ -216,7 +216,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 			log.Error(perr, "deprovisioning failed unexpectedly")
 		}
 
-		log.Info("controller yielding")
+		log.Info("controller yielding", "message", perr.Error())
 
 		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}
