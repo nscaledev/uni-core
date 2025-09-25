@@ -25,6 +25,7 @@ import (
 	"github.com/unikorn-cloud/core/pkg/errors"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,17 +68,19 @@ func GenerateResourceReference(client client.Client, resource client.Object) (st
 // deletion will have consequences.  It may also be used to inhibit deletion in
 // certain cercumstances.
 func GetResourceReferences(object client.Object) []string {
+	ignored := []string{
+		// Our finalizer to inhibit deletion until we are finished.
+		constants.Finalizer,
+		// Some internal components will use cacscading deletion to
+		// block deletion.
+		metav1.FinalizerDeleteDependents,
+	}
+
 	discard := func(s string) bool {
-		return s == constants.Finalizer
+		return slices.Contains(ignored, s)
 	}
 
 	return slices.DeleteFunc(slices.Clone(object.GetFinalizers()), discard)
-}
-
-// hasExternalReferences tells us if we have any external finalizers on our object
-// above and beyond the default one.
-func hasExternalReferences(object client.Object) bool {
-	return len(GetResourceReferences(object)) != 0
 }
 
 // ClearResourceReferences is used by controllers whose object may reference one of

@@ -34,6 +34,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -166,6 +167,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
 
+	// Wait for any owned resources to be cleaned up first.
+	if controllerutil.ContainsFinalizer(object, metav1.FinalizerDeleteDependents) {
+		log.Info("awaiting owned resource deletion")
+
+		// Still want it to report as deprovisioning.
+		// TODO: perhaps a blocked state would be useful??
+		if err := r.handleReconcileCondition(ctx, object, provisioners.ErrYield, true); err != nil {
+			return reconcile.Result{}, err
+		}
+
+		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+	}
+
 	// Resources from one service can inhibit the deletion of those in others to
 	// enforce deletion ordering.  This is especially relevant for cascading deletion
 	// of CAPO Kubernetes clusters via the underlying network...  Deletion of the
@@ -176,8 +190,8 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 	// of errors being displayed to users, hangs (because OpenStack will happily delete a
 	// project with compute and network resources still using it, which will get orhpaned
 	// and cannot be deleted via non-admin means), or more insiduosly resource leaks.
-	if hasExternalReferences(object) {
-		log.Info("awaiting resource users to release references")
+	if references := GetResourceReferences(object); len(references) > 0 {
+		log.Info("awaiting resource reference deletion", "references", references)
 
 		// Still want it to report as deprovisioning.
 		// TODO: perhaps a blocked state would be useful??
@@ -201,6 +215,8 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 		if !errors.Is(perr, provisioners.ErrYield) {
 			log.Error(perr, "deprovisioning failed unexpectedly")
 		}
+
+		log.Info("controller yielding")
 
 		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}

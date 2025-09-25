@@ -387,8 +387,50 @@ func TestReconcileDeleteYield(t *testing.T) {
 	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonDeprovisioning)
 }
 
+// TestReconcileDeleteYieldDependents checks that a resource with deleting dependents
+// via owner references does nothing.
+func TestReconcileDeleteYieldDependents(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+			Finalizers: []string{
+				constants.Finalizer,
+				metav1.FinalizerDeleteDependents,
+			},
+			DeletionTimestamp: &metav1.Time{
+				Time: time.Now(),
+			},
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	// Does the resource still exist in Kubernetes?
+	var result unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
+	assert.Contains(t, result.Finalizers, constants.Finalizer)
+	assert.Contains(t, result.Finalizers, metav1.FinalizerDeleteDependents)
+	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonDeprovisioning)
+}
+
 // TestReconcileDeleteYieldExternalReferences checks that a resource with finalizers
-// other that our default do nothing.
+// other than our default do nothing.
 func TestReconcileDeleteYieldExternalReferences(t *testing.T) {
 	t.Parallel()
 

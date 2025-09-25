@@ -77,6 +77,7 @@ func TestRererenceRead(t *testing.T) {
 			Name: "foo",
 			Finalizers: []string{
 				constants.Finalizer,
+				metav1.FinalizerDeleteDependents,
 				reference1,
 				reference2,
 			},
@@ -88,8 +89,9 @@ func TestRererenceRead(t *testing.T) {
 	require.Contains(t, references, reference1)
 	require.Contains(t, references, reference2)
 
-	require.Len(t, object.Finalizers, 3)
+	require.Len(t, object.Finalizers, 4)
 	require.Contains(t, object.Finalizers, constants.Finalizer)
+	require.Contains(t, object.Finalizers, metav1.FinalizerDeleteDependents)
 	require.Contains(t, object.Finalizers, reference1)
 	require.Contains(t, object.Finalizers, reference2)
 }
