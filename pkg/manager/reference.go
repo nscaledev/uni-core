@@ -19,6 +19,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/unikorn-cloud/core/pkg/constants"
@@ -30,6 +31,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // GenerateResourceReference takes a resource and generates a unique reference for use with
@@ -83,10 +85,72 @@ func GetResourceReferences(object client.Object) []string {
 	return slices.DeleteFunc(slices.Clone(object.GetFinalizers()), discard)
 }
 
-// ClearResourceReferences is used by controllers whose object may reference one of
-// many other resources e.g. a server can reference multiple security groups.  This
-// is used to clean them out during the finalizing phase of deletion.
-func ClearResourceReferences(ctx context.Context, cli client.Client, resources client.ObjectList, options *client.ListOptions, reference string) error {
+// resourceIDMap takes a resource list and generates a map from resource ID to the
+// resource itself.
+func resourceIDMap(resources client.ObjectList) (map[string]client.Object, error) {
+	out := map[string]client.Object{}
+
+	callback := func(resource runtime.Object) error {
+		object, ok := resource.(client.Object)
+		if !ok {
+			return fmt.Errorf("%w: resource not a client object", errors.ErrTypeConversion)
+		}
+
+		out[object.GetName()] = object
+
+		return nil
+	}
+
+	if err := meta.EachListItem(resources, callback); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// AddResourceReferences adds the given resource reference to all resources that match the selector
+// and that are in the given set of IDs.  An error is raised if an ID is not present.  This is
+// typically run by a controller before the resource is consumed.
+func AddResourceReferences(ctx context.Context, cli client.Client, resources client.ObjectList, options *client.ListOptions, reference string, ids []string) error {
+	log := log.FromContext(ctx)
+
+	if err := cli.List(ctx, resources, options); err != nil {
+		return err
+	}
+
+	resourceIDMap, err := resourceIDMap(resources)
+	if err != nil {
+		return err
+	}
+
+	for _, id := range ids {
+		resource, ok := resourceIDMap[id]
+		if !ok {
+			return fmt.Errorf("%w: attempt to reference unknown resource ID %s", errors.ErrConsistency, id)
+		}
+
+		if log.V(1).Enabled() {
+			log.Info("adding resource reference", "reference", reference, "id", id, "type", reflect.ValueOf(resource).Elem().Type().Name())
+		}
+
+		if updated := controllerutil.AddFinalizer(resource, reference); !updated {
+			continue
+		}
+
+		if err := cli.Update(ctx, resource); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// RemoveResourceReferences removes the given resource reference from all resources that match the
+// selector and that are not in the given set of IDs.  This is typically run by a controller after
+// a resource has stopped being used.
+func RemoveResourceReferences(ctx context.Context, cli client.Client, resources client.ObjectList, options *client.ListOptions, reference string, ids []string) error {
+	log := log.FromContext(ctx)
+
 	if err := cli.List(ctx, resources, options); err != nil {
 		return err
 	}
@@ -97,12 +161,31 @@ func ClearResourceReferences(ctx context.Context, cli client.Client, resources c
 			return fmt.Errorf("%w: resource not a client object", errors.ErrTypeConversion)
 		}
 
+		if slices.Contains(ids, object.GetName()) {
+			return nil
+		}
+
+		if log.V(1).Enabled() {
+			log.Info("removing resource reference", "reference", reference, "id", object.GetName(), "type", reflect.ValueOf(resource).Elem().Type().Name())
+		}
+
 		if updated := controllerutil.RemoveFinalizer(object, reference); !updated {
 			return nil
 		}
 
-		return cli.Update(ctx, object)
+		if err := cli.Update(ctx, object); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	return meta.EachListItem(resources, callback)
+}
+
+// ClearResourceReferences is used by controllers whose object may reference one of
+// many other resources e.g. a server can reference multiple security groups.  This
+// is used to clean them out during the finalizing phase of deletion.
+func ClearResourceReferences(ctx context.Context, cli client.Client, resources client.ObjectList, options *client.ListOptions, reference string) error {
+	return RemoveResourceReferences(ctx, cli, resources, options, reference, nil)
 }
