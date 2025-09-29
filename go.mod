@@ -5,6 +5,7 @@ go 1.24.2
 require (
 	github.com/Masterminds/semver/v3 v3.3.1
 	github.com/brunoga/deep v1.2.4
+	github.com/evanphx/json-patch v5.9.0+incompatible
 	github.com/felixge/httpsnoop v1.0.4
 	github.com/getkin/kin-openapi v0.132.0
 	github.com/go-jose/go-jose/v4 v4.1.1
@@ -34,7 +35,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
-	github.com/evanphx/json-patch v5.9.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect

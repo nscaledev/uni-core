@@ -17,9 +17,13 @@ limitations under the License.
 package conversion
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
+
+	jsonpatch "github.com/evanphx/json-patch"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
@@ -28,6 +32,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var (
@@ -240,6 +246,42 @@ func UpdateObjectMetadata(required, current metav1.Object, mutators ...MetadataM
 			return err
 		}
 	}
+
+	return nil
+}
+
+// LogUpdate takes a diff of two resources and logs them.
+func LogUpdate(ctx context.Context, current, required metav1.Object) error {
+	log := log.FromContext(ctx)
+
+	currentJSON, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("%w: failed to marshal current object", err)
+	}
+
+	requiredJSON, err := json.Marshal(required)
+	if err != nil {
+		return fmt.Errorf("%w: failed to marshal required object", err)
+	}
+
+	patch, err := jsonpatch.CreateMergePatch(currentJSON, requiredJSON)
+	if err != nil {
+		return fmt.Errorf("%w: failed to generate merge patch", err)
+	}
+
+	var patchRaw any
+
+	if err := json.Unmarshal(patch, &patchRaw); err != nil {
+		return fmt.Errorf("%w: failed to unmarshal merge patch", err)
+	}
+
+	var currentRaw any
+
+	if err := json.Unmarshal(currentJSON, &currentRaw); err != nil {
+		return fmt.Errorf("%w: failed to current raw", err)
+	}
+
+	log.Info("patching resource", "current", currentRaw, "patch", patchRaw)
 
 	return nil
 }
