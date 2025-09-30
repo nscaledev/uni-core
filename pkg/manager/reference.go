@@ -108,6 +108,30 @@ func resourceIDMap(resources client.ObjectList) (map[string]client.Object, error
 	return out, nil
 }
 
+// AddResourceReference adds the given resource reference to the specified resource.
+// This is typically run by a controller before the resource is consumed.
+func AddResourceReference(ctx context.Context, cli client.Client, resource client.Object, key client.ObjectKey, reference string) error {
+	log := log.FromContext(ctx)
+
+	if err := cli.Get(ctx, key, resource); err != nil {
+		return err
+	}
+
+	if updated := controllerutil.AddFinalizer(resource, reference); !updated {
+		return nil
+	}
+
+	if log.V(1).Enabled() {
+		log.Info("adding resource reference", "reference", reference, "id", key.Name, "type", reflect.ValueOf(resource).Elem().Type().Name())
+	}
+
+	if err := cli.Update(ctx, resource); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // AddResourceReferences adds the given resource reference to all resources that match the selector
 // and that are in the given set of IDs.  An error is raised if an ID is not present.  This is
 // typically run by a controller before the resource is consumed.
@@ -129,17 +153,41 @@ func AddResourceReferences(ctx context.Context, cli client.Client, resources cli
 			return fmt.Errorf("%w: attempt to reference unknown resource ID %s", errors.ErrConsistency, id)
 		}
 
-		if log.V(1).Enabled() {
-			log.Info("adding resource reference", "reference", reference, "id", id, "type", reflect.ValueOf(resource).Elem().Type().Name())
-		}
-
 		if updated := controllerutil.AddFinalizer(resource, reference); !updated {
 			continue
+		}
+
+		if log.V(1).Enabled() {
+			log.Info("adding resource reference", "reference", reference, "id", id, "type", reflect.ValueOf(resource).Elem().Type().Name())
 		}
 
 		if err := cli.Update(ctx, resource); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// RemoveResourceReference removes the given resource reference from the selected resource.
+// This is typically run by a controller after a resource has stopped being used.
+func RemoveResourceReference(ctx context.Context, cli client.Client, resource client.Object, key client.ObjectKey, reference string) error {
+	log := log.FromContext(ctx)
+
+	if err := cli.Get(ctx, key, resource); err != nil {
+		return err
+	}
+
+	if updated := controllerutil.RemoveFinalizer(resource, reference); !updated {
+		return nil
+	}
+
+	if log.V(1).Enabled() {
+		log.Info("removing resource reference", "reference", reference, "id", key.Name, "type", reflect.ValueOf(resource).Elem().Type().Name())
+	}
+
+	if err := cli.Update(ctx, resource); err != nil {
+		return err
 	}
 
 	return nil
@@ -165,12 +213,12 @@ func RemoveResourceReferences(ctx context.Context, cli client.Client, resources 
 			return nil
 		}
 
-		if log.V(1).Enabled() {
-			log.Info("removing resource reference", "reference", reference, "id", object.GetName(), "type", reflect.ValueOf(resource).Elem().Type().Name())
-		}
-
 		if updated := controllerutil.RemoveFinalizer(object, reference); !updated {
 			return nil
+		}
+
+		if log.V(1).Enabled() {
+			log.Info("removing resource reference", "reference", reference, "id", object.GetName(), "type", reflect.ValueOf(resource).Elem().Type().Name())
 		}
 
 		if err := cli.Update(ctx, object); err != nil {
