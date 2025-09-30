@@ -19,6 +19,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -340,7 +341,7 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("provisioning application", "application", p.Name)
+	log.V(1).Info("provisioning application", "application", p.Name)
 
 	// Convert the generic object type into what's expected by the driver interface.
 	id, err := p.getResourceID(ctx)
@@ -354,10 +355,14 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 	}
 
 	if err := cd.FromContext(ctx).CreateOrUpdateHelmApplication(ctx, id, application); err != nil {
+		if errors.Is(err, provisioners.ErrYield) {
+			log.Info("awaiting application provisioning", "application", p.Name)
+		}
+
 		return err
 	}
 
-	log.Info("application provisioned", "application", p.Name)
+	log.V(1).Info("application provisioned", "application", p.Name)
 
 	if p.generator != nil {
 		if hook, ok := p.generator.(PostProvisionHook); ok {
@@ -386,7 +391,7 @@ func (p *Provisioner) Deprovision(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("deprovisioning application", "application", p.Name)
+	log.V(1).Info("deprovisioning application", "application", p.Name)
 
 	id, err := p.getResourceID(ctx)
 	if err != nil {

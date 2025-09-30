@@ -53,7 +53,7 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 	log := log.FromContext(ctx)
 
 	if !p.condition() {
-		log.Info("conditional deprovision", "provisioner", p.Name)
+		log.V(1).Info("conditional deprovision", "provisioner", p.Name)
 
 		return p.provisioner.Deprovision(ctx)
 	}

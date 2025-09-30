@@ -48,17 +48,17 @@ var _ provisioners.Provisioner = &Provisioner{}
 func (p *Provisioner) Provision(ctx context.Context) error {
 	log := log.FromContext(ctx)
 
-	log.Info("provisioning serial group", "group", p.Name)
+	log.V(1).Info("provisioning serial group", "group", p.Name)
 
 	for _, provisioner := range p.provisioners {
 		if err := provisioner.Provision(ctx); err != nil {
-			log.Info("serial group member exited with error", "error", err, "group", p.Name, "provisioner", provisioner.ProvisionerName())
+			log.V(1).Info("serial group member exited with error", "error", err, "group", p.Name, "provisioner", provisioner.ProvisionerName())
 
 			return err
 		}
 	}
 
-	log.Info("serial group provisioned", "group", p.Name)
+	log.V(1).Info("serial group provisioned", "group", p.Name)
 
 	return nil
 }
@@ -70,19 +70,19 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 func (p *Provisioner) Deprovision(ctx context.Context) error {
 	log := log.FromContext(ctx)
 
-	log.Info("deprovisioning serial group", "group", p.Name)
+	log.V(1).Info("deprovisioning serial group", "group", p.Name)
 
 	for i := range p.provisioners {
 		provisioner := p.provisioners[len(p.provisioners)-(i+1)]
 
 		if err := provisioner.Deprovision(ctx); err != nil {
-			log.Info("serial group member exited with error", "error", err, "group", p.Name, "provisioner", provisioner.ProvisionerName())
+			log.V(1).Info("serial group member exited with error", "error", err, "group", p.Name, "provisioner", provisioner.ProvisionerName())
 
 			return err
 		}
 	}
 
-	log.Info("serial group deprovisioned", "group", p.Name)
+	log.V(1).Info("serial group deprovisioned", "group", p.Name)
 
 	return nil
 }

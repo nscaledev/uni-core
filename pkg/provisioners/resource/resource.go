@@ -67,14 +67,14 @@ func (p *Provisioner) Provision(ctx context.Context) error {
 
 	objectKey := client.ObjectKeyFromObject(p.resource)
 
-	log.Info("creating object", "key", objectKey)
+	log.V(1).Info("creating object", "key", objectKey)
 
 	result, err := controllerutil.CreateOrUpdate(ctx, clusterContext.Client, p.resource, mutate)
 	if err != nil {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("object %v", result), "name", p.resource.GetName(), "generateName", p.resource.GetGenerateName())
+	log.V(1).Info(fmt.Sprintf("object %v", result), "name", p.resource.GetName(), "generateName", p.resource.GetGenerateName())
 
 	return nil
 }
@@ -90,11 +90,11 @@ func (p *Provisioner) Deprovision(ctx context.Context) error {
 
 	objectKey := client.ObjectKeyFromObject(p.resource)
 
-	log.Info("deleting object", "key", objectKey)
+	log.V(1).Info("deleting object", "key", objectKey)
 
 	if err := clusterContext.Client.Delete(ctx, p.resource); err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("object deleted", "key", objectKey)
+			log.V(1).Info("object deleted", "key", objectKey)
 
 			return nil
 		}
@@ -102,7 +102,7 @@ func (p *Provisioner) Deprovision(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("awaiting object deletion", "key", objectKey)
+	log.V(1).Info("awaiting object deletion", "key", objectKey)
 
 	return provisioners.ErrYield
 }

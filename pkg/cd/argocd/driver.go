@@ -372,7 +372,7 @@ func (d *Driver) CreateOrUpdateHelmApplication(ctx context.Context, id *cd.Resou
 
 		resource = required
 	} else {
-		log.Info("updating existing application", "application", id.Name)
+		log.V(1).Info("updating existing application", "application", id.Name)
 
 		// Replace the specification with what we expect.
 		temp := resource.DeepCopy()
@@ -435,7 +435,7 @@ func (d *Driver) DeleteHelmApplication(ctx context.Context, id *cd.ResourceIdent
 		return provisioners.ErrYield
 	}
 
-	log.Info("adding application finalizer", "application", id.Name)
+	log.V(1).Info("adding application finalizer", "application", id.Name)
 
 	// Apply a finalizer to ensure synchronous deletion. See
 	// https://argo-cd.readthedocs.io/en/stable/user-guide/app_deletion/
@@ -450,7 +450,7 @@ func (d *Driver) DeleteHelmApplication(ctx context.Context, id *cd.ResourceIdent
 		return err
 	}
 
-	log.Info("deleting application", "application", id.Name)
+	log.V(1).Info("deleting application", "application", id.Name)
 
 	if err := d.client.Delete(ctx, resource); err != nil {
 		return err
@@ -569,7 +569,7 @@ func (d *Driver) CreateOrUpdateCluster(ctx context.Context, id *cd.ResourceIdent
 			return err
 		}
 
-		log.Info("awaiting cluster connectivity")
+		log.V(1).Info("awaiting cluster connectivity")
 
 		tester := d.options.K8SAPITester
 
@@ -582,7 +582,7 @@ func (d *Driver) CreateOrUpdateCluster(ctx context.Context, id *cd.ResourceIdent
 				return err
 			}
 
-			log.Info("failed to get kubernetes service")
+			log.Info("failed to connect to kubernetes service")
 
 			return provisioners.ErrYield
 		}
@@ -620,16 +620,16 @@ func (d *Driver) CreateOrUpdateCluster(ctx context.Context, id *cd.ResourceIdent
 		"config": configData,
 	}
 
-	log.Info("reconciling cluster", "id", id)
+	log.V(1).Info("reconciling cluster", "id", id)
 
 	result, err := controllerutil.CreateOrPatch(ctx, d.client, current, mustateSecret(current, labels, data))
 	if err != nil {
-		log.Info("cluster reconcile failed", "error", err)
+		log.V(1).Info("cluster reconcile failed", "error", err)
 
 		return err
 	}
 
-	log.Info("cluster reconciled", "id", id, "result", result)
+	log.V(1).Info("cluster reconciled", "id", id, "result", result)
 
 	return nil
 }
