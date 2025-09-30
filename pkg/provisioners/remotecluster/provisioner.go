@@ -165,7 +165,7 @@ func (p *remoteClusterProvisioner) provisionRemote(ctx context.Context) error {
 
 	// If this is the first remote cluster encountered, reconcile it.
 	if p.remote.controller && p.remote.currentCount == 1 {
-		log.Info("provisioning remote cluster", "remotecluster", id)
+		log.V(1).Info("provisioning remote cluster", "remotecluster", id)
 
 		config, err := p.remote.generator.Config(ctx)
 		if err != nil {
@@ -178,12 +178,12 @@ func (p *remoteClusterProvisioner) provisionRemote(ctx context.Context) error {
 		}
 
 		if err := cd.FromContext(ctx).CreateOrUpdateCluster(ctx, id, cluster); err != nil {
-			log.Info("remote cluster not ready, yielding", "remotecluster", id)
+			log.V(1).Info("remote cluster not ready, yielding", "remotecluster", id)
 
 			return provisioners.ErrYield
 		}
 
-		log.Info("remote cluster provisioned", "remotecluster", id)
+		log.V(1).Info("remote cluster provisioned", "remotecluster", id)
 	}
 
 	return nil
@@ -311,13 +311,13 @@ func (p *remoteClusterProvisioner) Deprovision(ctx context.Context) error {
 	// ... and if all have completed without an error, then deprovision the
 	// remote cluster itself.
 	if p.remote.controller && p.remote.currentCount == p.remote.refCount {
-		log.Info("deprovisioning remote cluster", "remotecluster", id)
+		log.V(1).Info("deprovisioning remote cluster", "remotecluster", id)
 
 		if err := cd.FromContext(ctx).DeleteCluster(ctx, id); err != nil {
 			return err
 		}
 
-		log.Info("remote cluster deprovisioned", "remotecluster", id)
+		log.V(1).Info("remote cluster deprovisioned", "remotecluster", id)
 	}
 
 	return nil
