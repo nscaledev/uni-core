@@ -364,7 +364,7 @@ func (d *Driver) CreateOrUpdateHelmApplication(ctx context.Context, id *cd.Resou
 	}
 
 	if resource == nil {
-		log.Info("creating new application", "application", id.Name)
+		log.V(1).Info("creating new application", "application", id.Name)
 
 		if err := d.client.Create(ctx, required); err != nil {
 			return err
@@ -417,7 +417,7 @@ func (d *Driver) DeleteHelmApplication(ctx context.Context, id *cd.ResourceIdent
 	resource, err := d.GetHelmApplication(ctx, id)
 	if err != nil {
 		if errors.Is(err, cd.ErrNotFound) {
-			log.Info("application deleted", "application", id.Name)
+			log.V(1).Info("application deleted", "application", id.Name)
 
 			return nil
 		}
