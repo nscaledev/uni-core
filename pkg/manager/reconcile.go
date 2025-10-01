@@ -139,12 +139,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 
-	if object.Paused() {
-		log.Info("reconcilication paused")
-
-		return reconcile.Result{}, nil
-	}
-
 	// If it's being deleted, ignore if there are no finalizers, Kubernetes is in
 	// charge now.  If the finalizer is still in place, run the deprovisioning.
 	if object.GetDeletionTimestamp() != nil {
@@ -155,6 +149,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		log.Info("deleting object")
 
 		return r.reconcileDelete(ctx, provisioner, object)
+	}
+
+	if object.Paused() {
+		log.Info("reconcilication paused")
+
+		return reconcile.Result{}, nil
 	}
 
 	// Create or update the resource.
