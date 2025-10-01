@@ -245,7 +245,8 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 	// Update the status conditionally, this will remove transient errors etc.
 	if err := r.handleReconcileCondition(ctx, object, perr, false); err != nil {
-		return reconcile.Result{}, err
+		//nolint:nilerr
+		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
 	}
 
 	// If anything went wrong, requeue for another attempt.
