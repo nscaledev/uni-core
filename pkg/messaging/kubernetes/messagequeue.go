@@ -26,10 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
-	toolscache "k8s.io/client-go/tools/cache"
 
 	cr "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -61,17 +59,6 @@ func (q *MessageQueue) Run(ctx context.Context) error {
 		// Kubernetes doesn't do partitions so we limit to a single consumer.
 		LeaderElection:   true,
 		LeaderElectionID: filepath.Base(os.Args[0]),
-		// Disables caching, as we don't need the memory overhead.
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				q.object: {
-					Transform: toolscache.TransformFunc(func(obj interface{}) (interface{}, error) {
-						//nolint: nilnil
-						return nil, nil
-					}),
-				},
-			},
-		},
 	}
 
 	manager, err := cr.NewManager(q.config, options)
