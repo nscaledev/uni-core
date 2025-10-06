@@ -19,22 +19,17 @@ package manager
 
 import (
 	"context"
-	"flag"
 	"os"
 
 	"github.com/spf13/pflag"
 
 	coreclient "github.com/unikorn-cloud/core/pkg/client"
 	"github.com/unikorn-cloud/core/pkg/manager/options"
-	"github.com/unikorn-cloud/core/pkg/manager/otel"
-
-	klog "k8s.io/klog/v2"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -150,16 +145,8 @@ func doUpgrade(f ControllerFactory, options *options.Options) error {
 
 // Run provides common manager initialization and execution.
 func Run(f ControllerFactory) {
-	zapOptions := &zap.Options{}
-	zapOptions.BindFlags(flag.CommandLine)
-
-	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
-
 	o := &options.Options{}
 	o.AddFlags(pflag.CommandLine)
-
-	otelOptions := &otel.Options{}
-	otelOptions.AddFlags(pflag.CommandLine)
 
 	controllerOptions := f.Options()
 	if controllerOptions != nil {
@@ -168,10 +155,7 @@ func Run(f ControllerFactory) {
 
 	pflag.Parse()
 
-	logr := zap.New(zap.UseFlagOptions(zapOptions))
-
-	log.SetLogger(logr)
-	klog.SetLogger(logr)
+	o.SetupLogging()
 
 	application, version, revision := f.Metadata()
 
@@ -180,7 +164,7 @@ func Run(f ControllerFactory) {
 
 	ctx := signals.SetupSignalHandler()
 
-	if err := otelOptions.Setup(ctx); err != nil {
+	if err := o.SetupOpenTelemetry(ctx); err != nil {
 		logger.Error(err, "open telemetry setup failed")
 		os.Exit(1)
 	}
