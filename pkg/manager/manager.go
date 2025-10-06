@@ -25,6 +25,7 @@ import (
 
 	coreclient "github.com/unikorn-cloud/core/pkg/client"
 	"github.com/unikorn-cloud/core/pkg/manager/options"
+	"github.com/unikorn-cloud/core/pkg/util"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -45,7 +46,7 @@ type ControllerOptions interface {
 // minimal code.
 type ControllerFactory interface {
 	// Metadata returns the application, version and revision.
-	Metadata() (string, string, string)
+	Metadata() util.ServiceDescriptor
 
 	// Options may be nil, otherwise it's a controller specific set of
 	// options that are added to the flagset on start up and passed to the
@@ -87,12 +88,12 @@ func getManager(f ControllerFactory) (manager.Manager, error) {
 		return nil, err
 	}
 
-	application, _, _ := f.Metadata()
+	service := f.Metadata()
 
 	options := manager.Options{
 		Scheme:           scheme,
 		LeaderElection:   true,
-		LeaderElectionID: application,
+		LeaderElectionID: service.Name,
 	}
 
 	manager, err := manager.New(config, options)
@@ -115,9 +116,9 @@ func getController(o *options.Options, controllerOptions ControllerOptions, mana
 		Reconciler:              f.Reconciler(o, controllerOptions, manager),
 	}
 
-	application, _, _ := f.Metadata()
+	service := f.Metadata()
 
-	c, err := controller.New(application, manager, options)
+	c, err := controller.New(service.Name, manager, options)
 	if err != nil {
 		return nil, err
 	}
@@ -157,10 +158,10 @@ func Run(f ControllerFactory) {
 
 	o.SetupLogging()
 
-	application, version, revision := f.Metadata()
+	service := f.Metadata()
 
 	logger := log.Log.WithName("init")
-	logger.Info("service starting", "application", application, "version", version, "revision", revision)
+	logger.Info("service starting", "application", service.Name, "version", service.Version, "revision", service.Revision)
 
 	ctx := signals.SetupSignalHandler()
 
