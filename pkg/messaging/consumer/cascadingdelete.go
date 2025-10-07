@@ -24,8 +24,10 @@ import (
 	"github.com/unikorn-cloud/core/pkg/messaging"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -105,6 +107,12 @@ func (c *CascadingDelete) Consume(ctx context.Context, envelope *messaging.Envel
 		return err
 	}
 
+	// Some resources may use ownder references to perform cascading deletion
+	// of their children, and they will need to block until cleanup has occurred.
+	deleteOptions := &client.DeleteOptions{
+		PropagationPolicy: ptr.To(metav1.DeletePropagationForeground),
+	}
+
 	deleteItem := func(object runtime.Object) error {
 		resource, ok := object.(client.Object)
 		if !ok {
@@ -118,7 +126,7 @@ func (c *CascadingDelete) Consume(ctx context.Context, envelope *messaging.Envel
 
 		log.Info("deleting resource", "id", resource.GetName())
 
-		if err := c.client.Delete(ctx, resource); err != nil {
+		if err := c.client.Delete(ctx, resource, deleteOptions); err != nil {
 			return err
 		}
 
