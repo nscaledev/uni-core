@@ -42,19 +42,25 @@ type ControllerOptions interface {
 	AddFlags(f *pflag.FlagSet)
 }
 
+// NullControllerOptions is used for controllers with no options.
+type NullControllerOptions struct{}
+
+func (o *NullControllerOptions) AddFlags(_ *pflag.FlagSet) {
+}
+
 // ControllerFactory allows creation of a Unikorn controller with
 // minimal code.
-type ControllerFactory interface {
+type ControllerFactory[Options ControllerOptions] interface {
 	// Metadata returns the application, version and revision.
 	Metadata() util.ServiceDescriptor
 
 	// Options may be nil, otherwise it's a controller specific set of
 	// options that are added to the flagset on start up and passed to the
 	// reonciler.
-	Options() ControllerOptions
+	Options() Options
 
 	// Reconciler returns a new reconciler instance.
-	Reconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager) reconcile.Reconciler
+	Reconciler(options *options.Options, controllerOptions Options, manager manager.Manager) reconcile.Reconciler
 
 	// RegisterWatches adds any watches that would trigger a reconcile.
 	RegisterWatches(manager manager.Manager, controller controller.Controller) error
@@ -75,7 +81,7 @@ type ControllerUpgrader interface {
 }
 
 // getManager returns a generic manager.
-func getManager(f ControllerFactory) (manager.Manager, error) {
+func getManager[Options ControllerOptions](f ControllerFactory[Options]) (manager.Manager, error) {
 	// Create a manager with leadership election to prevent split brain
 	// problems, and set the scheme so it gets propagated to the client.
 	config, err := clientconfig.GetConfig()
@@ -105,7 +111,7 @@ func getManager(f ControllerFactory) (manager.Manager, error) {
 }
 
 // getController returns a generic controller.
-func getController(o *options.Options, controllerOptions ControllerOptions, manager manager.Manager, f ControllerFactory) (controller.Controller, error) {
+func getController[Options ControllerOptions](o *options.Options, controllerOptions Options, manager manager.Manager, f ControllerFactory[Options]) (controller.Controller, error) {
 	// This prevents a single bad reconcile from affecting all the rest by
 	// boning the whole container.
 	recoverPanic := true
@@ -127,7 +133,7 @@ func getController(o *options.Options, controllerOptions ControllerOptions, mana
 }
 
 // doUpgrade allows a controller to optionally define an online upgrade procedure.
-func doUpgrade(f ControllerFactory, options *options.Options) error {
+func doUpgrade[Options ControllerOptions](f ControllerFactory[Options], options *options.Options) error {
 	if upgrader, ok := f.(ControllerUpgrader); ok {
 		ctx := context.TODO()
 
@@ -145,14 +151,12 @@ func doUpgrade(f ControllerFactory, options *options.Options) error {
 }
 
 // Run provides common manager initialization and execution.
-func Run(f ControllerFactory) {
+func Run[Options ControllerOptions](f ControllerFactory[Options]) {
 	o := &options.Options{}
 	o.AddFlags(pflag.CommandLine)
 
 	controllerOptions := f.Options()
-	if controllerOptions != nil {
-		controllerOptions.AddFlags(pflag.CommandLine)
-	}
+	controllerOptions.AddFlags(pflag.CommandLine)
 
 	pflag.Parse()
 
