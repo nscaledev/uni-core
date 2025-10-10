@@ -118,6 +118,9 @@ const (
 	// ApplicationIDLabel is used to lookup applications based on their ID.
 	ApplicationIDLabel = "unikorn-cloud.org/application-id"
 
+	// NetworkLabel is used to lookup resources based on network attachment.
+	NetworkLabel = "unikorn-cloud.org/network-id"
+
 	// ConfigurationHashAnnotation is used where application owners refuse to
 	// poll configuration updates and we (and all other users) are forced into
 	// manually restarting services based on a Deployment/DaemonSet changing.
@@ -129,6 +132,7 @@ const (
 
 	// PhysicalNetworkAnnotation tells you the physical network (in the
 	// context of a region controller) that a recource owns.
+	// Deprecated: use NetworkLabel instead.
 	PhysicalNetworkAnnotation = "unikorn-cloud.org/physical-network-id"
 
 	// AllocationAnnotation is used by resources that consume resources that
