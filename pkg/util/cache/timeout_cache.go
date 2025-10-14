@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,7 @@ type TimeoutCache[V any] struct {
 	value   V
 	refresh time.Duration
 	invalid time.Time
+	rwlock  sync.RWMutex
 }
 
 // New gets a new cache.
@@ -40,6 +42,9 @@ func New[V any](refresh time.Duration) *TimeoutCache[V] {
 //
 //nolint:nonamedreturns
 func (m *TimeoutCache[V]) Get() (value V, ok bool) {
+	m.rwlock.RLock()
+	defer m.rwlock.RUnlock()
+
 	if time.Now().After(m.invalid) {
 		return
 	}
@@ -50,6 +55,8 @@ func (m *TimeoutCache[V]) Get() (value V, ok bool) {
 // Set remembers the value and resets the invalid time based
 // on when the cache was set.
 func (m *TimeoutCache[V]) Set(value V) {
+	m.rwlock.Lock()
+	defer m.rwlock.Unlock()
 	m.invalid = time.Now().Add(m.refresh)
 	m.value = value
 }
