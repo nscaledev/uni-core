@@ -41,7 +41,13 @@ var (
 )
 
 // convertStatusCondition translates from Kubernetes status conditions to API ones.
-func convertStatusCondition(in any) openapi.ResourceProvisioningStatus {
+func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus {
+	// We set the status after a reconcile, so this allows us to
+	// reflect the correct state to the user immediately.
+	if in.GetDeletionTimestamp() != nil {
+		return openapi.ResourceProvisioningStatusDeprovisioning
+	}
+
 	// Not a resource with status conditions, consider it provisioned.
 	reader, ok := in.(unikornv1.StatusConditionReader)
 	if !ok {
