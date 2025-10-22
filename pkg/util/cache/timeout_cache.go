@@ -60,3 +60,7 @@ func (m *TimeoutCache[V]) Set(value V) {
 	m.invalid = time.Now().Add(m.refresh)
 	m.value = value
 }
+
+func (m *TimeoutCache[V]) Invalidate() {
+	m.invalid = time.Time{}
+}
