@@ -144,7 +144,7 @@ func TestResourceReadMetadataAdvanced(t *testing.T) {
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
 	require.Equal(t, creationTime, out.CreationTime)
-	require.Equal(t, openapi.ResourceProvisioningStatusUnknown, out.ProvisioningStatus)
+	require.Equal(t, openapi.ResourceProvisioningStatusDeprovisioning, out.ProvisioningStatus)
 	require.Equal(t, openapi.ResourceHealthStatusUnknown, out.HealthStatus)
 
 	require.Equal(t, ptr.To(description), out.Description)
@@ -170,7 +170,7 @@ func TestOrganizationScopedResourceReadMetadataAdvanced(t *testing.T) {
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
 	require.Equal(t, creationTime, out.CreationTime)
-	require.Equal(t, openapi.ResourceProvisioningStatusUnknown, out.ProvisioningStatus)
+	require.Equal(t, openapi.ResourceProvisioningStatusDeprovisioning, out.ProvisioningStatus)
 	require.Equal(t, openapi.ResourceHealthStatusUnknown, out.HealthStatus)
 
 	require.Equal(t, ptr.To(description), out.Description)
@@ -198,7 +198,7 @@ func TestProjectScopedResourceReadMetadata(t *testing.T) {
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
 	require.Equal(t, creationTime, out.CreationTime)
-	require.Equal(t, openapi.ResourceProvisioningStatusUnknown, out.ProvisioningStatus)
+	require.Equal(t, openapi.ResourceProvisioningStatusDeprovisioning, out.ProvisioningStatus)
 	require.Equal(t, openapi.ResourceHealthStatusUnknown, out.HealthStatus)
 
 	require.Equal(t, ptr.To(description), out.Description)

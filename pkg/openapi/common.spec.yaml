@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Common API types.
-  version: 1.9.0
+  version: 1.10.0
 paths: {}
 components:
   parameters:
