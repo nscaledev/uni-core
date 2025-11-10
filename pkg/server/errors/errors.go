@@ -38,6 +38,7 @@ const (
 	InvalidScope            OAuth2ErrorType = "invalid_scope"
 	MethodNotAllowed        OAuth2ErrorType = "method_not_allowed"
 	NotFound                OAuth2ErrorType = "not_found"
+	RequestEntityTooLarge   OAuth2ErrorType = "request_entity_too_large"
 	ServerError             OAuth2ErrorType = "server_error"
 	TemporarilyUnavailable  OAuth2ErrorType = "temporarily_unavailable"
 	UnauthorizedClient      OAuth2ErrorType = "unauthorized_client"
@@ -198,6 +199,10 @@ func HTTPMethodNotAllowed() *Error {
 // HTTPConflict is raised when a request conflicts with another resource.
 func HTTPConflict() *Error {
 	return newError(http.StatusConflict, Conflict, "the requested resource already exists")
+}
+
+func HTTPRequestEntityTooLarge(description string) *Error {
+	return newError(http.StatusRequestEntityTooLarge, RequestEntityTooLarge, description)
 }
 
 // OAuth2InvalidRequest indicates a client error.
