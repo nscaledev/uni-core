@@ -25,35 +25,35 @@ import (
 	"github.com/unikorn-cloud/core/pkg/util/cache"
 )
 
+func testPresent(t *testing.T, cache *cache.TimeoutCache[int], expected int) {
+	t.Helper()
+
+	actual, ok := cache.Get()
+	require.True(t, ok)
+	require.Equal(t, expected, actual)
+}
+
+func testAbsent(t *testing.T, cache *cache.TimeoutCache[int]) {
+	t.Helper()
+
+	actual, ok := cache.Get()
+	require.False(t, ok)
+	require.Zero(t, actual)
+}
+
 func TestTimeoutCache_Invalidate(t *testing.T) {
 	t.Parallel()
 
 	timeoutCache := cache.New[int](time.Hour)
 
-	var (
-		actual int
-		ok     bool
-	)
-
-	actual, ok = timeoutCache.Get()
-	require.False(t, ok)
-	require.Zero(t, actual)
+	testAbsent(t, timeoutCache)
 
 	expected := 1024
 	timeoutCache.Set(expected)
-
-	actual, ok = timeoutCache.Get()
-	require.True(t, ok)
-	require.Equal(t, expected, actual)
-
-	require.True(t, ok)
-	require.Equal(t, expected, actual)
+	testPresent(t, timeoutCache, expected)
 
 	timeoutCache.Invalidate()
-
-	actual, ok = timeoutCache.Get()
-	require.False(t, ok)
-	require.Zero(t, actual)
+	testAbsent(t, timeoutCache)
 }
 
 type staticClock struct {
@@ -78,26 +78,31 @@ func TestTimeoutCache_Timeout(t *testing.T) {
 	c := newStaticClock()
 
 	timeoutCache := cache.NewWithClock[int](time.Hour, c)
+	testAbsent(t, timeoutCache)
 
-	var (
-		actual int
-		ok     bool
-	)
-
-	actual, ok = timeoutCache.Get()
-	require.False(t, ok)
-	require.Zero(t, actual)
-
-	expected := 1024
+	expected := 65535
 	timeoutCache.Set(expected)
-
-	actual, ok = timeoutCache.Get()
-	require.True(t, ok)
-	require.Equal(t, expected, actual)
+	testPresent(t, timeoutCache, expected)
 
 	c.advance(61 * time.Minute)
+	testAbsent(t, timeoutCache)
+}
 
-	actual, ok = timeoutCache.Get()
-	require.False(t, ok)
-	require.Zero(t, actual)
+func TestTimeoutCache_SetResetsTimeout(t *testing.T) {
+	t.Parallel()
+
+	c := newStaticClock()
+
+	timeoutCache := cache.NewWithClock[int](time.Hour, c)
+	testAbsent(t, timeoutCache)
+
+	expected := 8
+	timeoutCache.Set(expected)
+	testPresent(t, timeoutCache, expected)
+
+	c.advance(61 * time.Minute)
+	testAbsent(t, timeoutCache)
+
+	timeoutCache.Set(expected)
+	testPresent(t, timeoutCache, expected)
 }
