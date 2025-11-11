@@ -25,7 +25,7 @@ import (
 	"github.com/unikorn-cloud/core/pkg/util/cache"
 )
 
-func TestTimeoutCache(t *testing.T) {
+func TestTimeoutCache_Invalidate(t *testing.T) {
 	t.Parallel()
 
 	timeoutCache := cache.New[int](time.Hour)
@@ -50,6 +50,52 @@ func TestTimeoutCache(t *testing.T) {
 	require.Equal(t, expected, actual)
 
 	timeoutCache.Invalidate()
+
+	actual, ok = timeoutCache.Get()
+	require.False(t, ok)
+	require.Zero(t, actual)
+}
+
+type staticClock struct {
+	time time.Time
+}
+
+func newStaticClock() *staticClock {
+	return &staticClock{time.Now()}
+}
+
+func (c *staticClock) Now() time.Time {
+	return c.time
+}
+
+func (c *staticClock) advance(d time.Duration) {
+	c.time = c.time.Add(d)
+}
+
+func TestTimeoutCache_Timeout(t *testing.T) {
+	t.Parallel()
+
+	c := newStaticClock()
+
+	timeoutCache := cache.NewWithClock[int](time.Hour, c)
+
+	var (
+		actual int
+		ok     bool
+	)
+
+	actual, ok = timeoutCache.Get()
+	require.False(t, ok)
+	require.Zero(t, actual)
+
+	expected := 1024
+	timeoutCache.Set(expected)
+
+	actual, ok = timeoutCache.Get()
+	require.True(t, ok)
+	require.Equal(t, expected, actual)
+
+	c.advance(61 * time.Minute)
 
 	actual, ok = timeoutCache.Get()
 	require.False(t, ok)
