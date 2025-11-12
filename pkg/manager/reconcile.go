@@ -49,10 +49,10 @@ var (
 )
 
 // ProvisionerCreateFunc provides a type agnosic method to create a root provisioner.
-type ProvisionerCreateFunc func(ControllerOptions) provisioners.ManagerProvisioner
+type ProvisionerCreateFunc[Options ControllerOptions] func(Options) provisioners.ManagerProvisioner
 
 // Reconciler is a generic reconciler for all manager types.
-type Reconciler struct {
+type Reconciler[Options ControllerOptions] struct {
 	// options allows CLI options to be interrogated in the reconciler.
 	options *options.Options
 
@@ -60,15 +60,15 @@ type Reconciler struct {
 	manager manager.Manager
 
 	// createProvisioner provides a type agnosic method to create a root provisioner.
-	createProvisioner ProvisionerCreateFunc
+	createProvisioner ProvisionerCreateFunc[Options]
 
 	// controllerOptions are options to be passed to the reconciler.
-	controllerOptions ControllerOptions
+	controllerOptions Options
 }
 
 // NewReconciler creates a new reconciler.
-func NewReconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager, createProvisioner ProvisionerCreateFunc) *Reconciler {
-	return &Reconciler{
+func NewReconciler[Options ControllerOptions](options *options.Options, controllerOptions Options, manager manager.Manager, createProvisioner ProvisionerCreateFunc[Options]) *Reconciler[Options] {
+	return &Reconciler[Options]{
 		options:           options,
 		manager:           manager,
 		createProvisioner: createProvisioner,
@@ -77,9 +77,9 @@ func NewReconciler(options *options.Options, controllerOptions ControllerOptions
 }
 
 // Ensure this implements the reconcile.Reconciler interface.
-var _ reconcile.Reconciler = &Reconciler{}
+var _ reconcile.Reconciler = &Reconciler[*NullControllerOptions]{}
 
-func (r *Reconciler) getDriver() (cd.Driver, error) {
+func (r *Reconciler[ControllerOptions]) getDriver() (cd.Driver, error) {
 	if r.options.CDDriver.Kind != cd.DriverKindArgoCD {
 		return nil, coreerrors.ErrCDDriver
 	}
@@ -90,7 +90,7 @@ func (r *Reconciler) getDriver() (cd.Driver, error) {
 // Reconcile is the top-level reconcile interface that controller-runtime will
 // dispatch to.  It initialises the provisioner, extracts the request object and
 // based on whether it exists or not, reconciles or deletes the object respectively.
-func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+func (r *Reconciler[ControllerOptions]) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
 
 	provisioner := r.createProvisioner(r.controllerOptions)
@@ -167,7 +167,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 // In the Deleting phase we wait for any references or dependencies to be cleaned.
 // In the Draining phase we hand off to the provision to clean up any resources.
 // In the Finalizing phase we remove our finalizer to allow deletion.
-func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
+func (r *Reconciler[ControllerOptions]) reconcileDelete(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
 
 	references := GetResourceReferences(object)
@@ -231,7 +231,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 
 // reconcileNormal adds the application finalizer, provisions the resource and
 // updates the resource status to indicate progress.
-func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
+func (r *Reconciler[ControllerOptions]) reconcileNormal(ctx context.Context, provisioner provisioners.Provisioner, object unikornv1.ManagableResourceInterface) (reconcile.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Add the finalizer so we can orchestrate resource garbage collection.
@@ -267,7 +267,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 // handleReconcileCondition inspects the error, if any, that halted the provisioning and reports
 // this as a ppropriate in the status.
-func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikornv1.ManagableResourceInterface, err error, deprovision bool) error {
+func (r *Reconciler[ControllerOptions]) handleReconcileCondition(ctx context.Context, object unikornv1.ManagableResourceInterface, err error, deprovision bool) error {
 	var status corev1.ConditionStatus
 
 	var reason unikornv1.ConditionReason
