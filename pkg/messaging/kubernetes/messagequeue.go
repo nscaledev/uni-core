@@ -35,24 +35,25 @@ import (
 type MessageQueue struct {
 	client.Client
 
-	config   *rest.Config
-	scheme   *runtime.Scheme
-	object   client.Object
-	consumer messaging.Consumer
+	config    *rest.Config
+	scheme    *runtime.Scheme
+	object    client.Object
+	consumers []messaging.Consumer
 }
 
-func New(config *rest.Config, scheme *runtime.Scheme, object client.Object, consumer messaging.Consumer) *MessageQueue {
+func New(config *rest.Config, scheme *runtime.Scheme, object client.Object) *MessageQueue {
 	return &MessageQueue{
-		config:   config,
-		scheme:   scheme,
-		object:   object,
-		consumer: consumer,
+		config: config,
+		scheme: scheme,
+		object: object,
 	}
 }
 
 var _ = messaging.Queue(&MessageQueue{})
 
-func (q *MessageQueue) Run(ctx context.Context) error {
+func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer) error {
+	q.consumers = consumers
+
 	options := cr.Options{
 		// Explicitly adds custom resource support.
 		Scheme: q.scheme,
@@ -96,8 +97,10 @@ func (q *MessageQueue) Reconcile(ctx context.Context, request cr.Request) (cr.Re
 		envelope.DeletionTimestamp = &t.Time
 	}
 
-	if err := q.consumer.Consume(ctx, envelope); err != nil {
-		return cr.Result{}, err
+	for _, consumer := range q.consumers {
+		if err := consumer.Consume(ctx, envelope); err != nil {
+			return cr.Result{}, err
+		}
 	}
 
 	return cr.Result{}, nil

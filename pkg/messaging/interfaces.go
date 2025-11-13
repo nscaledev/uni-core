@@ -32,5 +32,5 @@ type Consumer interface {
 // to mitigate transient errors.
 type Queue interface {
 	// Run starts the event queue consumption.  This is a blocking call.
-	Run(ctx context.Context) error
+	Run(ctx context.Context, consumers ...Consumer) error
 }
