@@ -21,10 +21,16 @@ import (
 	"time"
 )
 
+type clock interface {
+	Now() time.Time
+}
+
 // TimeoutCache provides a cache with timeout.
 type TimeoutCache[V any] struct {
 	value   V
 	refresh time.Duration
+	clock   clock
+
 	invalid time.Time
 	rwlock  sync.RWMutex
 }
@@ -33,6 +39,20 @@ type TimeoutCache[V any] struct {
 func New[V any](refresh time.Duration) *TimeoutCache[V] {
 	return &TimeoutCache[V]{
 		refresh: refresh,
+		clock:   wallclock{},
+	}
+}
+
+type wallclock struct{}
+
+func (wallclock) Now() time.Time {
+	return time.Now()
+}
+
+func NewWithClock[V any](refresh time.Duration, c clock) *TimeoutCache[V] {
+	return &TimeoutCache[V]{
+		refresh: refresh,
+		clock:   c,
 	}
 }
 
@@ -45,7 +65,7 @@ func (m *TimeoutCache[V]) Get() (value V, ok bool) {
 	m.rwlock.RLock()
 	defer m.rwlock.RUnlock()
 
-	if time.Now().After(m.invalid) {
+	if m.clock.Now().After(m.invalid) {
 		return
 	}
 
@@ -57,7 +77,7 @@ func (m *TimeoutCache[V]) Get() (value V, ok bool) {
 func (m *TimeoutCache[V]) Set(value V) {
 	m.rwlock.Lock()
 	defer m.rwlock.Unlock()
-	m.invalid = time.Now().Add(m.refresh)
+	m.invalid = m.clock.Now().Add(m.refresh)
 	m.value = value
 }
 
