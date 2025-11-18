@@ -1,15 +1,11 @@
 apiVersion: v2
 name: unikorn-core
 description: A Helm chart for deploying Unikorn Core
-
 type: application
-
-version: v1.11.0-rc3
-appVersion: v1.11.0-rc3
-
+version: v1.11.0-simon1
+appVersion: v1.11.0-simon1
 icon: https://assets.unikorn-cloud.org/images/logos/dark-on-light/icon.svg
-
 dependencies:
-- name: unikorn-common
-  version: v0.1.15
-  repository: https://nscaledev.github.io/uni-helm-common
+  - name: unikorn-common
+    version: v0.1.15
+    repository: https://nscaledev.github.io/uni-helm-common
