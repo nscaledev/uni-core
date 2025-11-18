@@ -1,10 +1,16 @@
 name: Release
 on:
-  push:
-    branches-ignore:
-    - '**'
-    tags:
-    - '*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Go version string e.g. v1.2.3
+        required: true
+        type: string
+      branch:
+        description: The git branch e.g. main, v1.2.x
+        required: false
+        type: string
+        default: main
 permissions:
   contents: write
   packages: write
@@ -12,20 +18,56 @@ jobs:
   Release:
     runs-on: ubuntu-latest
     steps:
+    - name: Create Access Token
+      id: access-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: 1150032 # Nscale Actions... this should really be its own variable.
+        private-key: ${{ secrets.NSCALE_ACTIONS_APP_PK }}
     - name: Checkout
       uses: actions/checkout@v3
       with:
+        ref: ${{ inputs.branch }}
+        token: ${{ steps.access-token.outputs.token }}
         fetch-depth: 0
+    # Bump Chart.yaml, this is the source of truth for all versioning.
+    - name: Update Chart.yaml
+      uses: fjogeleit/yaml-update-action@main
+      with:
+        valueFile: charts/core/Chart.yaml
+        changes: |
+          {
+            "version": "${{ inputs.version }}",
+            "appVersion": "${{ inputs.version }}"
+          }
+        commitChange: false
+    # Setup GPG.
+    - name: Configure GPG
+      run: |
+        echo -n ${{ secrets.SIGNING_KEY }} | base64 -d | gpg --import
+    # Setup Git with our GPG key.
+    - name: Configure Git
+      run: |
+        git config user.name "releasebot"
+        git config user.email "releasebot@users.noreply.github.com"
+        git config user.signingkey "${{ secrets.SIGNING_KEY_ID }}"
+    # And push the release.
+    - name: Commit Release
+      env:
+        GH_TOKEN: ${{ steps.access-token.outputs.token }}
+      run: |
+        gh api /user --jq '.login'
+        git commit -a -m "Version ${{ inputs.version }}"
+        SHA=$(git rev-parse HEAD)
+        git push origin ${SHA}:refs/heads/release-${SHA}
+        gh api --method PATCH "/repos/${{ github.repository }}/git/refs/heads/${{ inputs.branch }}" -f sha=${SHA}
+        gh api --method DELETE "/repos/${{ github.repository }}/git/refs/heads/release-${SHA}"
     - name: Install Helm
       uses: azure/setup-helm@v3
       with:
         version: v3.19.2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    - name: Configure Git
-      run: |
-        git config user.name "$GITHUB_ACTOR"
-        git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
     - name: Release Helm Chart
       uses: nscaledev/uni-chart-release-action@v2
       env:
@@ -34,5 +76,5 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        name: Release ${{ github.ref_name }}
-        tag_name: ${{ github.ref_name }}
+        name: Release ${{ inputs.version }}
+        tag_name: ${{ inputs.version }}
