@@ -166,7 +166,7 @@ func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.Tag
 	return out
 }
 
-// ProjectScopedResourceReadMetadata extracts project scoped metdata from a resource for
+// ProjectScopedResourceReadMetadata extracts project scoped metadata from a resource for
 // GET APIs.
 //
 //nolint:errchkjson
@@ -304,12 +304,10 @@ func LogUpdate(ctx context.Context, current, required metav1.Object) error {
 }
 
 func ConvertTag(in unikornv1.Tag) openapi.Tag {
-	out := openapi.Tag{
+	return openapi.Tag{
 		Name:  in.Name,
 		Value: in.Value,
 	}
-
-	return out
 }
 
 func ConvertTags(in unikornv1.TagList) openapi.TagList {
@@ -327,12 +325,10 @@ func ConvertTags(in unikornv1.TagList) openapi.TagList {
 }
 
 func GenerateTag(in openapi.Tag) unikornv1.Tag {
-	out := unikornv1.Tag{
+	return unikornv1.Tag{
 		Name:  in.Name,
 		Value: in.Value,
 	}
-
-	return out
 }
 
 func GenerateTagList(in *openapi.TagList) unikornv1.TagList {
