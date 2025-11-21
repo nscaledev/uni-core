@@ -66,6 +66,7 @@ func WriteErrorResponse(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func writeErrorCodeHeaders(w http.ResponseWriter, e *errorsv2.Error) {
+	w.Header().Set(errorsv2.HeaderErrorVersion, "2")
 	w.Header().Set(errorsv2.HeaderOAuth2Error, string(e.OAuth2ErrorCode))
 	w.Header().Set(errorsv2.HeaderAPIError, string(e.APIErrorCode))
 }
@@ -86,18 +87,22 @@ func WriteOAuth2ErrorResponse(w http.ResponseWriter, r *http.Request, err error)
 		response = errorsv2.NewInternalError().WithCause(err).Prefixed()
 	}
 
-	response.Type = errorsv2.ErrorTypeOAuth2Error
 	response.TraceID = trace.SpanContextFromContext(ctx).TraceID().String()
 	response.ErrorCode = string(response.OAuth2ErrorCode)
 
+	writeWWWAuthenticateHeader(w, response, true)
 	writeErrorCodeHeaders(w, response)
 
 	WriteJSONResponse(w, r, response.Status, response)
 }
 
-func writeWWWAuthenticateHeader(w http.ResponseWriter, e *errorsv2.Error) {
+func writeWWWAuthenticateHeader(w http.ResponseWriter, e *errorsv2.Error, oauth2Path bool) {
 	if e.WWWAuthenticate != "" {
 		w.Header().Set(errorsv2.HeaderWWWAuthenticate, e.WWWAuthenticate)
+		return
+	}
+
+	if !oauth2Path || e.OAuth2ErrorCode == "" {
 		return
 	}
 
@@ -130,11 +135,10 @@ func WriteAPIErrorResponse(w http.ResponseWriter, r *http.Request, err error) {
 		response = errorsv2.NewInternalError().WithCause(err).Prefixed()
 	}
 
-	response.Type = errorsv2.ErrorTypeAPIError
 	response.TraceID = trace.SpanContextFromContext(ctx).TraceID().String()
 	response.ErrorCode = string(response.APIErrorCode)
 
-	writeWWWAuthenticateHeader(w, response)
+	writeWWWAuthenticateHeader(w, response, false)
 	writeErrorCodeHeaders(w, response)
 
 	WriteJSONResponse(w, r, response.Status, response)

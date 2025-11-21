@@ -25,15 +25,9 @@ import (
 
 const (
 	HeaderWWWAuthenticate = "WWW-Authenticate"
+	HeaderErrorVersion    = "X-Error-Version"
 	HeaderOAuth2Error     = "X-Oauth2-Error"
 	HeaderAPIError        = "X-Api-Error"
-)
-
-type ErrorType string
-
-const (
-	ErrorTypeOAuth2Error ErrorType = "oauth2_error"
-	ErrorTypeAPIError    ErrorType = "api_error"
 )
 
 type OAuth2ErrorCode string
@@ -55,10 +49,10 @@ const (
 	APIErrorCodeInvalidRequest   APIErrorCode = "invalid_request"
 	APIErrorCodeTokenExpired     APIErrorCode = "token_expired"
 	APIErrorCodeUnauthorized     APIErrorCode = "unauthorized"
+	APIErrorCodeQuotaExhausted   APIErrorCode = "quota_exhausted"
 	APIErrorCodeResourceMissing  APIErrorCode = "resource_missing"
 	APIErrorCodeMethodNotAllowed APIErrorCode = "method_not_allowed"
 	APIErrorCodeConflict         APIErrorCode = "conflict"
-	APIErrorCodeQuotaExhausted   APIErrorCode = "quota_exhausted"
 	APIErrorCodeInternal         APIErrorCode = "internal"
 )
 
@@ -93,11 +87,10 @@ type Error struct {
 	OAuth2ErrorCode OAuth2ErrorCode `json:"-"`
 	APIErrorCode    APIErrorCode    `json:"-"`
 
-	Type             ErrorType `json:"type"`
-	Status           int       `json:"status"`
-	TraceID          string    `json:"trace_id"`
-	ErrorCode        string    `json:"error"`
-	ErrorDescription string    `json:"error_description"`
+	Status           int    `json:"status"`
+	TraceID          string `json:"trace_id"`
+	ErrorCode        string `json:"error"`
+	ErrorDescription string `json:"error_description"`
 }
 
 func (e *Error) Error() string {
@@ -254,6 +247,15 @@ func NewInsufficientScopeError() *Error {
 	}
 }
 
+func NewQuotaExhaustedError(resource string, desired, limit int64) *Error {
+	return &Error{
+		Prefix:           fmt.Sprintf("quota exhausted for resource %s", resource),
+		APIErrorCode:     APIErrorCodeQuotaExhausted,
+		Status:           http.StatusForbidden,
+		ErrorDescription: fmt.Sprintf("The requested allocation of %d for %s exceeds the allowed limit of %d.", desired, resource, limit),
+	}
+}
+
 func NewResourceMissingError(resource string) *Error {
 	return &Error{
 		Prefix:           fmt.Sprintf("%s not found", resource),
@@ -277,15 +279,6 @@ func NewConflictError() *Error {
 		Prefix:       "conflict",
 		APIErrorCode: APIErrorCodeConflict,
 		Status:       http.StatusConflict,
-	}
-}
-
-func NewQuotaExhaustedError(resource string, desired, limit int64) *Error {
-	return &Error{
-		Prefix:           fmt.Sprintf("quota exhausted for resource %s", resource),
-		APIErrorCode:     APIErrorCodeQuotaExhausted,
-		Status:           http.StatusConflict,
-		ErrorDescription: fmt.Sprintf("The requested allocation of %d for %s exceeds the allowed limit of %d.", desired, resource, limit),
 	}
 }
 

@@ -98,7 +98,7 @@ func (c *CascadingDelete) Consume(ctx context.Context, envelope *messaging.Envel
 	}
 
 	if c.resourceLabel != "" {
-		opts.LabelSelector = labels.SelectorFromSet(map[string]string{
+		opts.LabelSelector = labels.SelectorFromSet(labels.Set{
 			c.resourceLabel: envelope.ResourceID,
 		})
 	}

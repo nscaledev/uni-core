@@ -20,18 +20,11 @@ components:
       description: Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
       type: object
       required:
-      - type
       - status
       - trace_id
       - error
       - error_description
       properties:
-        type:
-          description: Specifies whether the error originated from an OAuth 2.0 context or from the general API.
-          type: string
-          enum:
-          - oauth2_error
-          - api_error
         status:
           description: The HTTP status code returned with the response.
           type: integer
@@ -212,7 +205,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 400
             trace_id: 77ce9d4485f746b6
             error: invalid_request
@@ -225,7 +217,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 401
             trace_id: 77ce9d4485f746b6
             error: token_expired
@@ -240,7 +231,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 403
             trace_id: 77ce9d4485f746b6
             error: access_denied
@@ -253,7 +243,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 404
             trace_id: 77ce9d4485f746b6
             error: resource_missing
@@ -266,7 +255,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 409
             trace_id: 77ce9d4485f746b6
             error: conflict
@@ -280,7 +268,6 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            type: api_error
             status: 500
             trace_id: 77ce9d4485f746b6
             error: internal
