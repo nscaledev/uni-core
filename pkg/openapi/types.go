@@ -26,12 +26,6 @@ const (
 	UnsupportedGrantType ErrorError = "unsupported_grant_type"
 )
 
-// Defines values for ErrorType.
-const (
-	ApiError    ErrorType = "api_error"
-	Oauth2Error ErrorType = "oauth2_error"
-)
-
 // Defines values for ResourceHealthStatus.
 const (
 	ResourceHealthStatusDegraded ResourceHealthStatus = "degraded"
@@ -62,16 +56,10 @@ type Error struct {
 
 	// TraceId A unique identifier associated with the request, allowing the issue to be traced across internal systems. Clients can provide this value when contacting support to assist with debugging.
 	TraceId string `json:"trace_id"`
-
-	// Type Specifies whether the error originated from an OAuth 2.0 context or from the general API.
-	Type ErrorType `json:"type"`
 }
 
 // ErrorError A concise, machine-readable identifier for the specific error, enabling clients to handle particular conditions programmatically.
 type ErrorError string
-
-// ErrorType Specifies whether the error originated from an OAuth 2.0 context or from the general API.
-type ErrorType string
 
 // KubernetesLabelValue A valid Kubernetes label value, typically used for resource names that can be
 // indexed in the database.

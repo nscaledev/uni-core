@@ -25,15 +25,9 @@ import (
 
 const (
 	HeaderWWWAuthenticate = "WWW-Authenticate"
+	HeaderErrorVersion    = "X-Error-Version"
 	HeaderOAuth2Error     = "X-Oauth2-Error"
 	HeaderAPIError        = "X-Api-Error"
-)
-
-type ErrorType string
-
-const (
-	ErrorTypeOAuth2Error ErrorType = "oauth2_error"
-	ErrorTypeAPIError    ErrorType = "api_error"
 )
 
 type OAuth2ErrorCode string
@@ -93,11 +87,10 @@ type Error struct {
 	OAuth2ErrorCode OAuth2ErrorCode `json:"-"`
 	APIErrorCode    APIErrorCode    `json:"-"`
 
-	Type             ErrorType `json:"type"`
-	Status           int       `json:"status"`
-	TraceID          string    `json:"trace_id"`
-	ErrorCode        string    `json:"error"`
-	ErrorDescription string    `json:"error_description"`
+	Status           int    `json:"status"`
+	TraceID          string `json:"trace_id"`
+	ErrorCode        string `json:"error"`
+	ErrorDescription string `json:"error_description"`
 }
 
 func (e *Error) Error() string {

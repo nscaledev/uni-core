@@ -55,7 +55,7 @@ func GenerateResourceReference(client client.Client, resource client.Object) (st
 
 	gvr := mapping.Resource
 
-	// TODO: This is a legacy thing where the OG Kubernetes service is not corrcetly
+	// TODO: This is a legacy thing where the OG Kubernetes service is not correctly
 	// namespaced, much like Amazon regions :D  We really need to work out a migration
 	// strategy.
 	if gvr.Group == "unikorn-cloud.org" {
@@ -68,7 +68,7 @@ func GenerateResourceReference(client client.Client, resource client.Object) (st
 // GetResourceReferences returns all resource references attached to a resource.
 // This is used primarily to poll a resource to see if it's in use, and thus its
 // deletion will have consequences.  It may also be used to inhibit deletion in
-// certain cercumstances.
+// certain circumstances.
 func GetResourceReferences(object client.Object) []string {
 	ignored := []string{
 		// Our finalizer to inhibit deletion until we are finished.
