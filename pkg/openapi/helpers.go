@@ -18,13 +18,15 @@ limitations under the License.
 package openapi
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
 
-	"github.com/unikorn-cloud/core/pkg/server/errors"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
 )
 
 // Schema abstracts schema access and validation.
@@ -65,8 +67,63 @@ func NewSchema(get SchemaGetter) (*Schema, error) {
 func (s *Schema) FindRoute(r *http.Request) (*routers.Route, map[string]string, error) {
 	route, params, err := s.router.FindRoute(r)
 	if err != nil {
-		return nil, nil, errors.OAuth2ServerError("unable to find route").WithError(err)
+		err = fmt.Errorf("failed to find route: %w", err)
+		return nil, nil, err
 	}
 
 	return route, params, nil
+}
+
+func parseJSONErrorResponse(headers http.Header, data []byte) error {
+	var response errorsv2.Error
+	if err := json.Unmarshal(data, &response); err != nil {
+		return errorsv2.NewInternalError().WithCause(err).Prefixed()
+	}
+
+	return response.WithSimpleCause("upstream error").
+		WithWWWAuthenticate(headers).
+		WithOAuth2ErrorCode(headers).
+		WithAPIErrorCode(headers)
+}
+
+//nolint:nlreturn,wsl
+func ParseJSONValueResponse[T any](headers http.Header, data []byte, status, expected int) (T, error) {
+	if status != expected {
+		var zero T
+		err := parseJSONErrorResponse(headers, data)
+		return zero, err
+	}
+
+	var response T
+	if err := json.Unmarshal(data, &response); err != nil {
+		err = errorsv2.NewInternalError().WithCause(err).Prefixed()
+		return response, err
+	}
+
+	return response, nil
+}
+
+//nolint:nlreturn,wsl
+func ParseJSONPointerResponse[T any](headers http.Header, data []byte, status, expected int) (*T, error) {
+	if status != expected {
+		var zero T
+		err := parseJSONErrorResponse(headers, data)
+		return &zero, err
+	}
+
+	var response T
+	if err := json.Unmarshal(data, &response); err != nil {
+		err = errorsv2.NewInternalError().WithCause(err).Prefixed()
+		return nil, err
+	}
+
+	return &response, nil
+}
+
+//nolint:nlreturn,wsl
+func AssertResponseStatus(headers http.Header, status, expected int) error {
+	if status != expected {
+		return parseJSONErrorResponse(headers, nil)
+	}
+	return nil
 }

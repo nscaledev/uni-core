@@ -17,35 +17,51 @@ components:
           type: string
   schemas:
     error:
-      description: Generic error message, compatible with oauth2.
+      description: Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
       type: object
       required:
+      - type
+      - status
+      - trace_id
       - error
       - error_description
       properties:
-        error:
-          description: A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
+        type:
+          description: Specifies whether the error originated from an OAuth 2.0 context or from the general API.
           type: string
           enum:
-          # Defined by OAuth 2.02
+          - oauth2_error
+          - api_error
+        status:
+          description: The HTTP status code returned with the response.
+          type: integer
+        trace_id:
+          description: A unique identifier associated with the request, allowing the issue to be traced across internal systems. Clients can provide this value when contacting support to assist with debugging.
+          type: string
+        error:
+          description: A concise, machine-readable identifier for the specific error, enabling clients to handle particular conditions programmatically.
+          type: string
+          enum:
+          # Common error codes
           - invalid_request
-          - unauthorized_client
-          - access_denied
-          - unsupported_response_type
-          - invalid_scope
-          - server_error
-          - temporarily_unavailable
-          - invalid_client
-          - invalid_grant
+          # OAuth 2.0 error codes
           - unsupported_grant_type
-          # Proprietary
-          - not_found
-          - conflict
+          - invalid_grant
+          - invalid_token
+          - invalid_client
+          - access_denied
+          - insufficient_scope
+          - server_error
+          # API error codes
+          - token_expired
+          - unauthorized
+          - resource_missing
           - method_not_allowed
-          - unsupported_media_type
-          - forbidden
+          - conflict
+          - quota_exhausted
+          - internal
         error_description:
-          description: Verbose message describing the error.
+          description: A human-readable explanation that provides additional context about the error. This field is omitted when no extra description is available.
           type: string
     kubernetesLabelValue:
       description: |-
@@ -196,8 +212,11 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
+            type: api_error
+            status: 400
+            trace_id: 77ce9d4485f746b6
             error: invalid_request
-            error_description: request body invalid
+            error_description: The request is invalid and does not conform to the required schema.
     unauthorizedResponse:
       description: |-
         Authentication failed or the access token has expired.
@@ -206,8 +225,11 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            error: access_denied
-            error_description: authentication failed
+            type: api_error
+            status: 401
+            trace_id: 77ce9d4485f746b6
+            error: token_expired
+            error_description: The provided token has expired.
     forbiddenResponse:
       description: |-
         Request was denied by authorization, this may be caused by the authorization
@@ -218,8 +240,11 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            error: forbidden
-            error_description: user credentials do not have the required privileges
+            type: api_error
+            status: 403
+            trace_id: 77ce9d4485f746b6
+            error: access_denied
+            error_description: The operation was denied by the OpenID Connect provider.
     notFoundResponse:
       description: |-
         Unable to find a resource.
@@ -228,8 +253,11 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            error: not_found
-            error_description: the requested resource does not exist
+            type: api_error
+            status: 404
+            trace_id: 77ce9d4485f746b6
+            error: resource_missing
+            error_description: The requested resource was not found.
     conflictResponse:
       description: |-
         Resource conflicts with another, usually this means they have the same name.
@@ -238,8 +266,11 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
+            type: api_error
+            status: 409
+            trace_id: 77ce9d4485f746b6
             error: conflict
-            error_description: a resource with the same name already exists
+            error_description: The resource is being deleted and cannot be modified.
     internalServerErrorResponse:
       description: |-
         An unexpected or unhandled error occurred. This may be a transient error and
@@ -249,5 +280,8 @@ components:
           schema:
             $ref: '#/components/schemas/error'
           example:
-            error: server_error
-            error_description: failed to token claim
+            type: api_error
+            status: 500
+            trace_id: 77ce9d4485f746b6
+            error: internal
+            error_description: The server encountered an unexpected condition. Please try again later. If the problem persists, please contact our team.
