@@ -9,21 +9,27 @@ import (
 
 // Defines values for ErrorError.
 const (
-	AccessDenied            ErrorError = "access_denied"
-	Conflict                ErrorError = "conflict"
-	Forbidden               ErrorError = "forbidden"
-	InvalidClient           ErrorError = "invalid_client"
-	InvalidGrant            ErrorError = "invalid_grant"
-	InvalidRequest          ErrorError = "invalid_request"
-	InvalidScope            ErrorError = "invalid_scope"
-	MethodNotAllowed        ErrorError = "method_not_allowed"
-	NotFound                ErrorError = "not_found"
-	ServerError             ErrorError = "server_error"
-	TemporarilyUnavailable  ErrorError = "temporarily_unavailable"
-	UnauthorizedClient      ErrorError = "unauthorized_client"
-	UnsupportedGrantType    ErrorError = "unsupported_grant_type"
-	UnsupportedMediaType    ErrorError = "unsupported_media_type"
-	UnsupportedResponseType ErrorError = "unsupported_response_type"
+	AccessDenied         ErrorError = "access_denied"
+	Conflict             ErrorError = "conflict"
+	InsufficientScope    ErrorError = "insufficient_scope"
+	Internal             ErrorError = "internal"
+	InvalidClient        ErrorError = "invalid_client"
+	InvalidGrant         ErrorError = "invalid_grant"
+	InvalidRequest       ErrorError = "invalid_request"
+	InvalidToken         ErrorError = "invalid_token"
+	MethodNotAllowed     ErrorError = "method_not_allowed"
+	QuotaExhausted       ErrorError = "quota_exhausted"
+	ResourceMissing      ErrorError = "resource_missing"
+	ServerError          ErrorError = "server_error"
+	TokenExpired         ErrorError = "token_expired"
+	Unauthorized         ErrorError = "unauthorized"
+	UnsupportedGrantType ErrorError = "unsupported_grant_type"
+)
+
+// Defines values for ErrorType.
+const (
+	ApiError    ErrorType = "api_error"
+	Oauth2Error ErrorType = "oauth2_error"
 )
 
 // Defines values for ResourceHealthStatus.
@@ -43,17 +49,29 @@ const (
 	ResourceProvisioningStatusUnknown        ResourceProvisioningStatus = "unknown"
 )
 
-// Error Generic error message, compatible with oauth2.
+// Error Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type Error struct {
-	// Error A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
+	// Error A concise, machine-readable identifier for the specific error, enabling clients to handle particular conditions programmatically.
 	Error ErrorError `json:"error"`
 
-	// ErrorDescription Verbose message describing the error.
+	// ErrorDescription A human-readable explanation that provides additional context about the error. This field is omitted when no extra description is available.
 	ErrorDescription string `json:"error_description"`
+
+	// Status The HTTP status code returned with the response.
+	Status int `json:"status"`
+
+	// TraceId A unique identifier associated with the request, allowing the issue to be traced across internal systems. Clients can provide this value when contacting support to assist with debugging.
+	TraceId string `json:"trace_id"`
+
+	// Type Specifies whether the error originated from an OAuth 2.0 context or from the general API.
+	Type ErrorType `json:"type"`
 }
 
-// ErrorError A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
+// ErrorError A concise, machine-readable identifier for the specific error, enabling clients to handle particular conditions programmatically.
 type ErrorError string
+
+// ErrorType Specifies whether the error originated from an OAuth 2.0 context or from the general API.
+type ErrorType string
 
 // KubernetesLabelValue A valid Kubernetes label value, typically used for resource names that can be
 // indexed in the database.
@@ -250,20 +268,20 @@ type TagList = []Tag
 // TagSelectorParameter defines model for tagSelectorParameter.
 type TagSelectorParameter = []string
 
-// BadRequestResponse Generic error message, compatible with oauth2.
+// BadRequestResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type BadRequestResponse = Error
 
-// ConflictResponse Generic error message, compatible with oauth2.
+// ConflictResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type ConflictResponse = Error
 
-// ForbiddenResponse Generic error message, compatible with oauth2.
+// ForbiddenResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type ForbiddenResponse = Error
 
-// InternalServerErrorResponse Generic error message, compatible with oauth2.
+// InternalServerErrorResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type InternalServerErrorResponse = Error
 
-// NotFoundResponse Generic error message, compatible with oauth2.
+// NotFoundResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type NotFoundResponse = Error
 
-// UnauthorizedResponse Generic error message, compatible with oauth2.
+// UnauthorizedResponse Represents a structured error response returned by the API. It consolidates both OAuth 2.0-related and general API errors into a unified format.
 type UnauthorizedResponse = Error

@@ -21,7 +21,7 @@ import (
 
 	unikornv1core "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/openapi"
-	"github.com/unikorn-cloud/core/pkg/server/errors"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
 )
 
 func DecodeTagSelectorParam(tags *openapi.TagSelectorParameter) (unikornv1core.TagList, error) {
@@ -34,7 +34,12 @@ func DecodeTagSelectorParam(tags *openapi.TagSelectorParameter) (unikornv1core.T
 	for i, tag := range *tags {
 		parts := strings.Split(tag, "=")
 		if len(parts) != 2 {
-			return nil, errors.OAuth2InvalidRequest("tag decode failed")
+			err := errorsv2.NewInvalidRequestError().
+				WithSimpleCause("malformed tag selector").
+				WithErrorDescription("One of the specified tag selectors isn't properly formatted in the request.").
+				Prefixed()
+
+			return nil, err
 		}
 
 		out[i] = unikornv1core.Tag{
