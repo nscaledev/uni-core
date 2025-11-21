@@ -28,6 +28,7 @@ import (
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
 	"github.com/unikorn-cloud/core/pkg/openapi"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
 	"github.com/unikorn-cloud/core/pkg/util"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -238,6 +239,16 @@ type MetadataMutationFunc func(required, current metav1.Object) error
 
 // UpdateObjectMetadata abstracts away metadata updates.
 func UpdateObjectMetadata(required, current metav1.Object, mutators ...MetadataMutationFunc) error {
+	if err := updateObjectMetadata(required, current, mutators); err != nil {
+		return errorsv2.NewInternalError().
+			WithCausef("failed to update object metadata: %w", err).
+			Prefixed()
+	}
+
+	return nil
+}
+
+func updateObjectMetadata(required, current metav1.Object, mutators []MetadataMutationFunc) error {
 	req := required.GetAnnotations()
 	if req == nil {
 		req = map[string]string{}

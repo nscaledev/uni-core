@@ -17,10 +17,17 @@ limitations under the License.
 package util
 
 import (
+	goerrors "errors"
+
 	"github.com/unikorn-cloud/core/pkg/constants"
-	"github.com/unikorn-cloud/core/pkg/server/errors"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+var (
+	ErrMissingLabel = goerrors.New("resource missing required label")
+	ErrOwnership    = goerrors.New("resource does not belong to the specified owner")
 )
 
 // AssertOrganizationOwnership checks whether the resource has the correct
@@ -30,17 +37,21 @@ import (
 // than do a full list lookup with a full set of label selectors.  This does
 // however mean that a user can ostensibly read any resource if it knows the ID.
 // Ensure we return a 404 here on error so we don't give away any facts about
-// resources that shoudn't be visible to the client.
+// resources that shouldn't be visible to the client.
 func AssertOrganizationOwnership(resource metav1.Object, organizationID string) error {
 	labels := resource.GetLabels()
 
 	id, ok := labels[constants.OrganizationLabel]
 	if !ok {
-		return errors.OAuth2ServerError("resource missing organization label")
+		return errorsv2.NewInternalError().
+			WithCausef("%w: %s", ErrMissingLabel, constants.OrganizationLabel).
+			Prefixed()
 	}
 
 	if id != organizationID {
-		return errors.HTTPNotFound()
+		return errorsv2.NewResourceMissingError("resource").
+			WithCause(ErrOwnership).
+			Prefixed()
 	}
 
 	return nil
@@ -57,11 +68,15 @@ func AssertProjectOwnership(resource metav1.Object, organizationID, projectID st
 
 	id, ok := labels[constants.ProjectLabel]
 	if !ok {
-		return errors.OAuth2ServerError("resource missing organization label")
+		return errorsv2.NewInternalError().
+			WithCausef("%w: %s", ErrMissingLabel, constants.ProjectLabel).
+			Prefixed()
 	}
 
 	if id != projectID {
-		return errors.HTTPNotFound()
+		return errorsv2.NewResourceMissingError("resource").
+			WithCause(ErrOwnership).
+			Prefixed()
 	}
 
 	return nil
