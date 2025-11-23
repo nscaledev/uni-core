@@ -28,6 +28,7 @@ import (
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
 	"github.com/unikorn-cloud/core/pkg/openapi"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
 	"github.com/unikorn-cloud/core/pkg/util"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -165,7 +166,7 @@ func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.Tag
 	return out
 }
 
-// ProjectScopedResourceReadMetadata extracts project scoped metdata from a resource for
+// ProjectScopedResourceReadMetadata extracts project scoped metadata from a resource for
 // GET APIs.
 //
 //nolint:errchkjson
@@ -238,6 +239,16 @@ type MetadataMutationFunc func(required, current metav1.Object) error
 
 // UpdateObjectMetadata abstracts away metadata updates.
 func UpdateObjectMetadata(required, current metav1.Object, mutators ...MetadataMutationFunc) error {
+	if err := updateObjectMetadata(required, current, mutators); err != nil {
+		return errorsv2.NewInternalError().
+			WithCausef("failed to update object metadata: %w", err).
+			Prefixed()
+	}
+
+	return nil
+}
+
+func updateObjectMetadata(required, current metav1.Object, mutators []MetadataMutationFunc) error {
 	req := required.GetAnnotations()
 	if req == nil {
 		req = map[string]string{}
@@ -293,12 +304,10 @@ func LogUpdate(ctx context.Context, current, required metav1.Object) error {
 }
 
 func ConvertTag(in unikornv1.Tag) openapi.Tag {
-	out := openapi.Tag{
+	return openapi.Tag{
 		Name:  in.Name,
 		Value: in.Value,
 	}
-
-	return out
 }
 
 func ConvertTags(in unikornv1.TagList) openapi.TagList {
@@ -316,12 +325,10 @@ func ConvertTags(in unikornv1.TagList) openapi.TagList {
 }
 
 func GenerateTag(in openapi.Tag) unikornv1.Tag {
-	out := unikornv1.Tag{
+	return unikornv1.Tag{
 		Name:  in.Name,
 		Value: in.Value,
 	}
-
-	return out
 }
 
 func GenerateTagList(in *openapi.TagList) unikornv1.TagList {

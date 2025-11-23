@@ -25,7 +25,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
-	"github.com/unikorn-cloud/core/pkg/server/errors"
+	errorsv2 "github.com/unikorn-cloud/core/pkg/server/v2/errors"
+	"github.com/unikorn-cloud/core/pkg/server/v2/httputil"
 	"github.com/unikorn-cloud/core/pkg/util"
 )
 
@@ -65,7 +66,13 @@ func Middleware(schema *openapi.Schema, options *Options) func(http.Handler) htt
 			// Handle preflight
 			method := r.Header.Get("Access-Control-Request-Method")
 			if method == "" {
-				errors.HandleError(w, r, errors.OAuth2InvalidRequest("OPTIONS missing Access-Control-Request-Method header"))
+				err := errorsv2.NewInvalidRequestError().
+					WithSimpleCause("missing Access-Control-Request-Method header").
+					WithErrorDescription("Missing Access-Control-Request-Method header in OPTIONS request.").
+					Prefixed()
+
+				httputil.WriteErrorResponse(w, r, err)
+
 				return
 			}
 
@@ -74,7 +81,7 @@ func Middleware(schema *openapi.Schema, options *Options) func(http.Handler) htt
 
 			route, _, err := schema.FindRoute(request)
 			if err != nil {
-				errors.HandleError(w, r, err)
+				httputil.WriteErrorResponse(w, r, err)
 				return
 			}
 
