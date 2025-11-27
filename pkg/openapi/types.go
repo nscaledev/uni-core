@@ -9,21 +9,15 @@ import (
 
 // Defines values for ErrorError.
 const (
-	AccessDenied            ErrorError = "access_denied"
-	Conflict                ErrorError = "conflict"
-	Forbidden               ErrorError = "forbidden"
-	InvalidClient           ErrorError = "invalid_client"
-	InvalidGrant            ErrorError = "invalid_grant"
-	InvalidRequest          ErrorError = "invalid_request"
-	InvalidScope            ErrorError = "invalid_scope"
-	MethodNotAllowed        ErrorError = "method_not_allowed"
-	NotFound                ErrorError = "not_found"
-	ServerError             ErrorError = "server_error"
-	TemporarilyUnavailable  ErrorError = "temporarily_unavailable"
-	UnauthorizedClient      ErrorError = "unauthorized_client"
-	UnsupportedGrantType    ErrorError = "unsupported_grant_type"
-	UnsupportedMediaType    ErrorError = "unsupported_media_type"
-	UnsupportedResponseType ErrorError = "unsupported_response_type"
+	AccessDenied          ErrorError = "access_denied"
+	Conflict              ErrorError = "conflict"
+	Forbidden             ErrorError = "forbidden"
+	InvalidRequest        ErrorError = "invalid_request"
+	MethodNotAllowed      ErrorError = "method_not_allowed"
+	NotFound              ErrorError = "not_found"
+	RequestEntityTooLarge ErrorError = "request_entity_too_large"
+	ServerError           ErrorError = "server_error"
+	UnsupportedMediaType  ErrorError = "unsupported_media_type"
 )
 
 // Defines values for ResourceHealthStatus.
