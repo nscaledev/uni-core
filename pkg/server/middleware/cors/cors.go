@@ -74,7 +74,7 @@ func Middleware(schema *openapi.Schema, options *Options) func(http.Handler) htt
 
 			route, _, err := schema.FindRoute(request)
 			if err != nil {
-				errors.HandleError(w, r, err)
+				errors.HandleError(w, r, errors.HTTPNotFound())
 				return
 			}
 
