@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info:
+  title: Some test fixture code.
+  version: 1.0.0
+paths:
+  /api:
+    get:
+      responses:
+        '200': {}
