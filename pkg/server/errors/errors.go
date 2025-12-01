@@ -22,45 +22,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/unikorn-cloud/core/pkg/openapi"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
-)
-
-// OAuth2ErrorType defines our core error type based on oauth2.
-type OAuth2ErrorType string
-
-const (
-	AccessDenied            OAuth2ErrorType = "access_denied"
-	Conflict                OAuth2ErrorType = "conflict"
-	Forbidden               OAuth2ErrorType = "forbidden"
-	InvalidClient           OAuth2ErrorType = "invalid_client"
-	InvalidGrant            OAuth2ErrorType = "invalid_grant"
-	InvalidRequest          OAuth2ErrorType = "invalid_request"
-	InvalidScope            OAuth2ErrorType = "invalid_scope"
-	MethodNotAllowed        OAuth2ErrorType = "method_not_allowed"
-	NotFound                OAuth2ErrorType = "not_found"
-	RequestEntityTooLarge   OAuth2ErrorType = "request_entity_too_large"
-	ServerError             OAuth2ErrorType = "server_error"
-	TemporarilyUnavailable  OAuth2ErrorType = "temporarily_unavailable"
-	UnauthorizedClient      OAuth2ErrorType = "unauthorized_client"
-	UnsupportedGrantType    OAuth2ErrorType = "unsupported_grant_type"
-	UnsupportedMediaType    OAuth2ErrorType = "unsupported_media_type"
-	UnsupportedResponseType OAuth2ErrorType = "unsupported_response_type"
-)
-
-// OAuth2Error is the type sent on the wire on error.
-type OAuth2Error struct {
-	// Error defines the error type.
-	Error OAuth2ErrorType `json:"error"`
-	// Description is a verbose description of the error.  This should be
-	// informative to the end user, not a bunch of debugging nonsense.  We
-	// keep that in telemetry dats.
-	//nolint:tagliatelle
-	Description string `json:"error_description"`
-}
-
-var (
-	// ErrRequest is raised for all handler errors.
-	ErrRequest = errors.New("request error")
 )
 
 // Error wraps ErrRequest with more contextual information that is used to
@@ -70,7 +34,7 @@ type Error struct {
 	status int
 
 	// code us the terse error code to return to the client.
-	code OAuth2ErrorType
+	code openapi.ErrorError
 
 	// description is a verbose description to log/return to the user.
 	description string
@@ -84,7 +48,7 @@ type Error struct {
 }
 
 // newError returns a new HTTP error.
-func newError(status int, code OAuth2ErrorType, description string) *Error {
+func newError(status int, code openapi.ErrorError, description string) *Error {
 	return &Error{
 		status:      status,
 		code:        code,
@@ -110,7 +74,7 @@ func (e *Error) WithValues(values ...any) *Error {
 
 // Unwrap implements Go 1.13 errors.
 func (e *Error) Unwrap() error {
-	return ErrRequest
+	return e.err
 }
 
 // Error implements the error interface.
@@ -147,9 +111,9 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(e.status)
 
 	// Emit the response body.
-	ge := &OAuth2Error{
-		Error:       e.code,
-		Description: e.description,
+	ge := &openapi.Error{
+		Error:            e.code,
+		ErrorDescription: e.description,
 	}
 
 	body, err := json.Marshal(ge)
@@ -168,12 +132,12 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 
 // HTTPForbidden is raised when a user isn't permitted to do something by RBAC.
 func HTTPForbidden(description string) *Error {
-	return newError(http.StatusForbidden, Forbidden, description)
+	return newError(http.StatusForbidden, openapi.Forbidden, description)
 }
 
 // HTTPNotFound is raised when the requested resource doesn't exist.
 func HTTPNotFound() *Error {
-	return newError(http.StatusNotFound, NotFound, "resource not found")
+	return newError(http.StatusNotFound, openapi.NotFound, "resource not found")
 }
 
 // IsHTTPNotFound interrogates the error type.
@@ -193,60 +157,34 @@ func IsHTTPNotFound(err error) bool {
 
 // HTTPMethodNotAllowed is raised when the method is not supported.
 func HTTPMethodNotAllowed() *Error {
-	return newError(http.StatusMethodNotAllowed, MethodNotAllowed, "the requested method was not allowed")
+	return newError(http.StatusMethodNotAllowed, openapi.MethodNotAllowed, "the requested method was not allowed")
 }
 
 // HTTPConflict is raised when a request conflicts with another resource.
 func HTTPConflict() *Error {
-	return newError(http.StatusConflict, Conflict, "the requested resource already exists")
+	return newError(http.StatusConflict, openapi.Conflict, "the requested resource already exists")
 }
 
 func HTTPRequestEntityTooLarge(description string) *Error {
-	return newError(http.StatusRequestEntityTooLarge, RequestEntityTooLarge, description)
+	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, description)
 }
 
 // OAuth2InvalidRequest indicates a client error.
 func OAuth2InvalidRequest(description string) *Error {
-	return newError(http.StatusBadRequest, InvalidRequest, description)
-}
-
-// OAuth2UnauthorizedClient indicates the client is not authorized to perform the
-// requested operation.
-func OAuth2UnauthorizedClient(description string) *Error {
-	return newError(http.StatusBadRequest, UnauthorizedClient, description)
-}
-
-// OAuth2UnsupportedGrantType is raised when the requested grant is not supported.
-func OAuth2UnsupportedGrantType(description string) *Error {
-	return newError(http.StatusBadRequest, UnsupportedGrantType, description)
-}
-
-// OAuth2InvalidGrant is raised when the requested grant is unknown.
-func OAuth2InvalidGrant(description string) *Error {
-	return newError(http.StatusBadRequest, InvalidGrant, description)
-}
-
-// OAuth2InvalidClient is raised when the client ID is not known.
-func OAuth2InvalidClient(description string) *Error {
-	return newError(http.StatusBadRequest, InvalidClient, description)
+	return newError(http.StatusBadRequest, openapi.InvalidRequest, description)
 }
 
 // OAuth2AccessDenied tells the client the authentication failed e.g.
 // username/password are wrong, or a token has expired and needs reauthentication.
 func OAuth2AccessDenied(description string) *Error {
-	return newError(http.StatusUnauthorized, AccessDenied, description)
+	return newError(http.StatusUnauthorized, openapi.AccessDenied, description)
 }
 
 // OAuth2ServerError tells the client we are at fault, this should never be seen
 // in production.  If so then our testing needs to improve.
+// Deprecated: this should be deleted everywhere and implicit handling used for brevity.
 func OAuth2ServerError(description string) *Error {
-	return newError(http.StatusInternalServerError, ServerError, description)
-}
-
-// OAuth2InvalidScope tells the client it doesn't have the necessary scope
-// to access the resource.
-func OAuth2InvalidScope(description string) *Error {
-	return newError(http.StatusUnauthorized, InvalidScope, description)
+	return newError(http.StatusInternalServerError, openapi.ServerError, description)
 }
 
 // toError is a handy unwrapper to get a HTTP error from a generic one.
@@ -263,15 +201,11 @@ func toError(err error) *Error {
 // HandleError is the top level error handler that should be called from all
 // path handlers on error.
 func HandleError(w http.ResponseWriter, r *http.Request, err error) {
-	log := log.FromContext(r.Context())
-
 	if httpError := toError(err); httpError != nil {
 		httpError.Write(w, r)
 
 		return
 	}
 
-	log.Error(err, "unhandled error")
-
-	OAuth2ServerError("unhandled error").Write(w, r)
+	OAuth2ServerError("an internal error has occurred, please contact support").WithError(err).Write(w, r)
 }
