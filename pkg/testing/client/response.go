@@ -43,39 +43,35 @@ type ResponseHandlerConfig struct {
 	AllowNotFound  bool
 }
 
-// HandleResourceListResponse handles common response patterns for resource listing endpoints.
+// HandleResourceListResponse handles common response patterns for resource listing endpoints using type-safe generics.
 // Returns an empty slice with an error for error cases where AllowForbidden or AllowNotFound is true.
-//
-// NOTE: This function uses map[string]interface{} for cross-service responses where typed structs
-// are not available (e.g., Region service responses proxied through Compute service).
-// For service-owned responses, prefer using typed response handlers.
-func HandleResourceListResponse(resp *http.Response, respBody []byte, config ResponseHandlerConfig) ([]map[string]interface{}, error) {
+// Type parameter T should be the concrete response type (e.g., []openapi.Cluster, []openapi.Region).
+func HandleResourceListResponse[T any](resp *http.Response, respBody []byte, config ResponseHandlerConfig) (T, error) {
+	var zero T
+
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var resources []map[string]interface{}
+		var resources T
 		if err := json.Unmarshal(respBody, &resources); err != nil {
-			return nil, fmt.Errorf("unmarshaling %s response: %w", config.ResourceType, err)
+			return zero, fmt.Errorf("unmarshaling %s response: %w", config.ResourceType, err)
 		}
 
 		return resources, nil
 	case http.StatusNotFound:
 		if config.AllowNotFound {
-			// Return empty list with error for test scenarios (as sometimes we want to test the error case)
-			return []map[string]interface{}{}, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrResourceNotFound)
+			return zero, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrResourceNotFound)
 		}
-		// Return error without empty list
-		return nil, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrResourceNotFound)
+
+		return zero, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrResourceNotFound)
 	case http.StatusForbidden:
 		if config.AllowForbidden {
-			// Return empty list with error for test scenarios
-			return []map[string]interface{}{}, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrAccessDenied)
+			return zero, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrAccessDenied)
 		}
-		// Return error without empty list
-		return nil, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrAccessDenied)
+
+		return zero, fmt.Errorf("%s '%s' (status: %d): %w", config.ResourceIDType, config.ResourceID, resp.StatusCode, ErrAccessDenied)
 	case http.StatusInternalServerError:
-		// Server error - always return empty list and error for test scenarios
-		return []map[string]interface{}{}, fmt.Errorf("reading %s for %s '%s' (status: %d): %s: %w", config.ResourceType, config.ResourceIDType, config.ResourceID, resp.StatusCode, string(respBody), ErrServerError)
+		return zero, fmt.Errorf("reading %s for %s '%s' (status: %d): %s: %w", config.ResourceType, config.ResourceIDType, config.ResourceID, resp.StatusCode, string(respBody), ErrServerError)
 	default:
-		return nil, fmt.Errorf("status code %d: %w", resp.StatusCode, ErrUnexpectedStatus)
+		return zero, fmt.Errorf("status code %d: %w", resp.StatusCode, ErrUnexpectedStatus)
 	}
 }

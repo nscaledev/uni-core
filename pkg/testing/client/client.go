@@ -131,19 +131,13 @@ func (c *APIClient) logTraceContext(traceParent string) {
 	}
 }
 
-// DoRequest performs an HTTP request with W3C trace context and returns the response.
-// If expectedStatus is > 0, the function will return an error if the response status doesn't match.
-//
-//nolint:cyclop // complexity acceptable for generic HTTP client
-func (c *APIClient) DoRequest(ctx context.Context, method, path string, body io.Reader, expectedStatus int) (*http.Response, []byte, error) {
-	fullURL := c.baseURL + path
-
+// buildHTTPRequest creates an HTTP request with trace context and authentication headers.
+func (c *APIClient) buildHTTPRequest(ctx context.Context, method, fullURL string, body io.Reader) (*http.Request, string, error) {
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating request: %w", err)
+		return nil, "", fmt.Errorf("creating request: %w", err)
 	}
 
-	// Add W3C Trace Context headers
 	traceParent := CreateTraceParent()
 	req.Header.Set("Traceparent", traceParent)
 	req.Header.Set("Tracestate", "test-automation=true")
@@ -156,48 +150,95 @@ func (c *APIClient) DoRequest(ctx context.Context, method, path string, body io.
 		req.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
 
+	return req, traceParent, nil
+}
+
+// executeHTTPRequest executes an HTTP request with timing and error handling.
+func (c *APIClient) executeHTTPRequest(req *http.Request, method, path, traceParent string) (*http.Response, time.Duration, error) {
 	start := time.Now()
 	resp, err := c.client.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
 		c.logError(method, path, duration, traceParent, err, "http request failed")
-		return nil, nil, fmt.Errorf("http request failed: %w", err)
+		return nil, duration, fmt.Errorf("http request failed: %w", err)
 	}
 
-	defer resp.Body.Close()
+	return resp, duration, nil
+}
 
+// readResponseBody reads the response body with error handling.
+func (c *APIClient) readResponseBody(resp *http.Response, method, path, traceParent string, duration time.Duration) ([]byte, error) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logErrorWithStatus(method, path, duration, resp.StatusCode, traceParent, err, "reading response body")
-		return resp, nil, fmt.Errorf("reading response body: %w", err)
+		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
+	return respBody, nil
+}
+
+// logRequestResponse logs the request and response if logging is enabled.
+func (c *APIClient) logRequestResponse(method, path string, statusCode int, duration time.Duration, traceParent string, respBody []byte) {
 	if c.config.LogRequests && c.logger != nil {
-		c.logger.Printf("[%s %s] status=%d duration=%s traceparent=%s\n", method, path, resp.StatusCode, duration, traceParent)
+		c.logger.Printf("[%s %s] status=%d duration=%s traceparent=%s\n", method, path, statusCode, duration, traceParent)
 	}
 
 	if c.config.LogResponses && len(respBody) > 0 && c.logger != nil {
 		c.logger.Printf("[%s %s] response body: %s\n", method, path, string(respBody))
 	}
+}
 
-	if expectedStatus > 0 && resp.StatusCode != expectedStatus {
-		c.logUnexpectedStatus(method, path, expectedStatus, resp.StatusCode, string(respBody), traceParent)
-		return resp, respBody, fmt.Errorf("expected %d, got %d, body: %s (%s): %w", expectedStatus, resp.StatusCode, string(respBody), FormatTraceContext(traceParent), ErrUnexpectedStatusCode)
+// validateStatusCode validates the response status code against the expected value.
+func (c *APIClient) validateStatusCode(method, path string, expectedStatus, actualStatus int, respBody []byte, traceParent string) error {
+	if expectedStatus > 0 && actualStatus != expectedStatus {
+		c.logUnexpectedStatus(method, path, expectedStatus, actualStatus, string(respBody), traceParent)
+		return fmt.Errorf("expected %d, got %d, body: %s (%s): %w", expectedStatus, actualStatus, string(respBody), FormatTraceContext(traceParent), ErrUnexpectedStatusCode)
+	}
+
+	return nil
+}
+
+// DoRequest performs an HTTP request with W3C trace context and returns the response.
+// If expectedStatus is > 0, the function will return an error if the response status doesn't match.
+func (c *APIClient) DoRequest(ctx context.Context, method, path string, body io.Reader, expectedStatus int) (*http.Response, []byte, error) {
+	fullURL := c.baseURL + path
+
+	req, traceParent, err := c.buildHTTPRequest(ctx, method, fullURL, body)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resp, duration, err := c.executeHTTPRequest(req, method, path, traceParent)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := c.readResponseBody(resp, method, path, traceParent, duration)
+	if err != nil {
+		return resp, nil, err
+	}
+
+	c.logRequestResponse(method, path, resp.StatusCode, duration, traceParent, respBody)
+
+	if err := c.validateStatusCode(method, path, expectedStatus, resp.StatusCode, respBody, traceParent); err != nil {
+		return resp, respBody, err
 	}
 
 	return resp, respBody, nil
 }
 
-// ListResource is a generic helper for list operations (for non-typed resources).
-// NOTE: This uses map[string]interface{} for cross-service responses. For service-owned
-// responses, prefer creating typed methods in your service client.
-func (c *APIClient) ListResource(ctx context.Context, path string, config ResponseHandlerConfig) ([]map[string]interface{}, error) {
+// ListResource is a type-safe generic helper for list operations.
+// Type parameter T should be the concrete response type (e.g., []openapi.Cluster).
+// Example usage: ListResource[[]openapi.Cluster](ctx, client, path, config).
+func ListResource[T any](ctx context.Context, c *APIClient, path string, config ResponseHandlerConfig) (T, error) {
+	var zero T
 	//nolint:bodyclose // response body is closed in DoRequest
 	resp, respBody, err := c.DoRequest(ctx, http.MethodGet, path, nil, 0)
 	if err != nil {
-		return nil, fmt.Errorf("listing %s: %w", config.ResourceType, err)
+		return zero, fmt.Errorf("listing %s: %w", config.ResourceType, err)
 	}
 
-	return HandleResourceListResponse(resp, respBody, config)
+	return HandleResourceListResponse[T](resp, respBody, config)
 }
