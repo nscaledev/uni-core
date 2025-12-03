@@ -19,6 +19,7 @@ package errors_test
 import (
 	"encoding/json"
 	goerrors "errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -186,4 +187,22 @@ func TestWithContext(t *testing.T) {
 			validate(t, w, test.code, header, test.errorString, messageFixture)
 		})
 	}
+}
+
+// TestRootCause ensures if we have nested errors for whatever reason, we return only
+// the root cause of the problem.
+func TestRootCause(t *testing.T) {
+	t.Parallel()
+
+	var err error
+
+	err = errors.OAuth2AccessDenied(messageFixture)
+	err = fmt.Errorf("%w: some debug information", err)
+	err = errors.OAuth2ServerError("I have no idea what I'm doing").WithError(err)
+
+	w := httptest.NewRecorder()
+
+	errors.HandleError(w, request(t), err)
+
+	validate(t, w, http.StatusUnauthorized, defaultheader(), openapi.AccessDenied, messageFixture)
 }

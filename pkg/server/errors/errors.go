@@ -83,6 +83,15 @@ func (e *Error) Error() string {
 	return e.description
 }
 
+// rootCause unwinds the error chain an yields the first aka root cause error.
+func (e *Error) rootCause() *Error {
+	for child := toError(e.err); child != nil; child = toError(e.err) {
+		e = child
+	}
+
+	return e
+}
+
 // Write returns the error code and description to the client.
 func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	// Log out any detail from the error that shouldn't be
@@ -106,7 +115,9 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("error detail", details...)
 
-	// Emit the response to the client.
+	// Emit the root cause error to the client.
+	e = e.rootCause()
+
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(e.status)
