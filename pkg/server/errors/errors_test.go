@@ -18,8 +18,10 @@ limitations under the License.
 package errors_test
 
 import (
+	"bytes"
 	"encoding/json"
 	goerrors "errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -211,8 +213,30 @@ func TestWithContext(t *testing.T) {
 	}
 }
 
+// TestUnauthorized tests the unauthorized error type sets the WWW-Authenticate header
+// correctly and tests for determinism.
+func TestUnauthorized(t *testing.T) {
+	t.Parallel()
+
+	w := httptest.NewRecorder()
+
+	errors.HandleError(w, request(t), errors.AccessDenied("acme.com", "cat"))
+
+	require.NotEmpty(t, w.Header().Get(errors.AuthenticateHeader))
+	require.Equal(t, `Bearer error="access_denied",error_description="cat",resource_metadata="https://acme.com/.well-known/openid-protected-resource"`, w.Header().Get(errors.AuthenticateHeader))
+}
+
 type openapiResponseFixture struct {
 	JSON400 *openapi.Error
+	JSON401 *openapi.Error
+}
+
+func httpResponseFixture(statusCode int) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header:     http.Header{},
+		Body:       io.NopCloser(&bytes.Buffer{}),
+	}
 }
 
 // TestPropagateError ensures errors are correctly extracted an propagated.
@@ -226,9 +250,11 @@ func TestPropagateError(t *testing.T) {
 		},
 	}
 
-	err := errors.PropagateError(http.StatusBadRequest, resp)
-	require.Error(t, err, "must return an error")
+	httpResponse := httpResponseFixture(http.StatusBadRequest)
+	defer httpResponse.Body.Close()
 
+	err := errors.PropagateError(httpResponse, resp)
+	require.Error(t, err, "must return an error")
 	require.True(t, errors.IsBadRequest(err))
 }
 
@@ -239,7 +265,10 @@ func TestPropagateErrorUnknownCode(t *testing.T) {
 
 	resp := &openapiResponseFixture{}
 
-	err := errors.PropagateError(http.StatusBadGateway, resp)
+	httpResponse := httpResponseFixture(http.StatusBadGateway)
+	defer httpResponse.Body.Close()
+
+	err := errors.PropagateError(httpResponse, resp)
 	require.Error(t, err, "must return an error")
 
 	var errorsError *errors.Error
@@ -254,7 +283,10 @@ func TestPropagateErrorUnpopulatedCode(t *testing.T) {
 
 	resp := &openapiResponseFixture{}
 
-	err := errors.PropagateError(http.StatusBadRequest, resp)
+	httpResponse := httpResponseFixture(http.StatusBadRequest)
+	defer httpResponse.Body.Close()
+
+	err := errors.PropagateError(httpResponse, resp)
 	require.Error(t, err, "must return an error")
 
 	var errorsError *errors.Error
