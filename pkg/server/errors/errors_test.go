@@ -137,7 +137,7 @@ func TestWithContext(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		f           func(string) *errors.Error
+		f           func(a ...any) *errors.Error
 		code        int
 		header      http.Header
 		errorString openapi.ErrorError
