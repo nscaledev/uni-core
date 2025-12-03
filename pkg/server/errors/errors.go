@@ -131,6 +131,11 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// FromOpenAPIError allows propagation across API calls.
+func FromOpenAPIError(code int, err *openapi.Error) *Error {
+	return newError(code, err.Error, err.ErrorDescription)
+}
+
 // HTTPForbidden is raised when a user isn't permitted to do something by RBAC.
 func HTTPForbidden(a ...any) *Error {
 	return newError(http.StatusForbidden, openapi.Forbidden, a...)
