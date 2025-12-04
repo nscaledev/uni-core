@@ -17,17 +17,16 @@ limitations under the License.
 package api
 
 import (
-	"errors"
+	goerrors "errors"
 	"fmt"
 	"reflect"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
+	"github.com/unikorn-cloud/core/pkg/server/errors"
 )
 
 var (
-	ErrExtraction = errors.New("api error extraction error")
-
-	ErrAPI = errors.New("api error")
+	ErrExtraction = goerrors.New("api error extraction error")
 )
 
 // ExtractError provides a response type agnostic way of extracting a human readable
@@ -51,17 +50,24 @@ func ExtractError(statusCode int, response any) error {
 	// ... that through the magic of autogeneration has a field for the status code ...
 	fieldName := fmt.Sprintf("JSON%d", statusCode)
 
-	v = v.FieldByName(fieldName)
-
-	if v.IsZero() {
+	f := v.FieldByName(fieldName)
+	if !f.IsValid() {
 		return fmt.Errorf("%w: error field %s not defined", ErrExtraction, fieldName)
 	}
 
+	if f.IsZero() {
+		return fmt.Errorf("%w: error field %s not populated", ErrExtraction, fieldName)
+	}
+
+	if !f.CanInterface() {
+		return fmt.Errorf("%w: error field %s not interfaceable", ErrExtraction, fieldName)
+	}
+
 	// ... which points to an Error.
-	concreteError, ok := v.Interface().(*openapi.Error)
+	concreteError, ok := f.Interface().(*openapi.Error)
 	if !ok {
 		return fmt.Errorf("%w: unable to assert error", ErrExtraction)
 	}
 
-	return fmt.Errorf("%w: %v - %v", ErrAPI, concreteError.Error, concreteError.ErrorDescription)
+	return errors.FromOpenAPIError(statusCode, concreteError)
 }
