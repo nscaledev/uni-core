@@ -20,6 +20,7 @@ package errors
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
@@ -48,11 +49,11 @@ type Error struct {
 }
 
 // newError returns a new HTTP error.
-func newError(status int, code openapi.ErrorError, description string) *Error {
+func newError(status int, code openapi.ErrorError, a ...any) *Error {
 	return &Error{
 		status:      status,
 		code:        code,
-		description: description,
+		description: fmt.Sprint(a...),
 	}
 }
 
@@ -131,8 +132,8 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 }
 
 // HTTPForbidden is raised when a user isn't permitted to do something by RBAC.
-func HTTPForbidden(description string) *Error {
-	return newError(http.StatusForbidden, openapi.Forbidden, description)
+func HTTPForbidden(a ...any) *Error {
+	return newError(http.StatusForbidden, openapi.Forbidden, a...)
 }
 
 // HTTPNotFound is raised when the requested resource doesn't exist.
@@ -165,26 +166,26 @@ func HTTPConflict() *Error {
 	return newError(http.StatusConflict, openapi.Conflict, "the requested resource already exists")
 }
 
-func HTTPRequestEntityTooLarge(description string) *Error {
-	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, description)
+func HTTPRequestEntityTooLarge(a ...any) *Error {
+	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, a...)
 }
 
 // OAuth2InvalidRequest indicates a client error.
-func OAuth2InvalidRequest(description string) *Error {
-	return newError(http.StatusBadRequest, openapi.InvalidRequest, description)
+func OAuth2InvalidRequest(a ...any) *Error {
+	return newError(http.StatusBadRequest, openapi.InvalidRequest, a...)
 }
 
 // OAuth2AccessDenied tells the client the authentication failed e.g.
 // username/password are wrong, or a token has expired and needs reauthentication.
-func OAuth2AccessDenied(description string) *Error {
-	return newError(http.StatusUnauthorized, openapi.AccessDenied, description)
+func OAuth2AccessDenied(a ...any) *Error {
+	return newError(http.StatusUnauthorized, openapi.AccessDenied, a...)
 }
 
 // OAuth2ServerError tells the client we are at fault, this should never be seen
 // in production.  If so then our testing needs to improve.
 // Deprecated: this should be deleted everywhere and implicit handling used for brevity.
-func OAuth2ServerError(description string) *Error {
-	return newError(http.StatusInternalServerError, openapi.ServerError, description)
+func OAuth2ServerError(a ...any) *Error {
+	return newError(http.StatusInternalServerError, openapi.ServerError, a...)
 }
 
 // toError is a handy unwrapper to get a HTTP error from a generic one.
