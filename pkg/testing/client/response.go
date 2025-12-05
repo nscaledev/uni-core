@@ -45,13 +45,13 @@ type ResponseHandlerConfig struct {
 
 // HandleResourceListResponse handles common response patterns for resource listing endpoints using type-safe generics.
 // Returns an empty slice with an error for error cases where AllowForbidden or AllowNotFound is true.
-// Type parameter T should be the concrete response type (e.g., []openapi.Cluster, []openapi.Region).
-func HandleResourceListResponse[T any](resp *http.Response, respBody []byte, config ResponseHandlerConfig) (T, error) {
-	var zero T
+// Type parameter T should be the element type (e.g., openapi.Cluster, openapi.Region).
+func HandleResourceListResponse[T any](resp *http.Response, respBody []byte, config ResponseHandlerConfig) ([]T, error) {
+	var zero []T
 
 	switch resp.StatusCode {
 	case http.StatusOK:
-		var resources T
+		var resources []T
 		if err := json.Unmarshal(respBody, &resources); err != nil {
 			return zero, fmt.Errorf("unmarshaling %s response: %w", config.ResourceType, err)
 		}

@@ -56,20 +56,14 @@ type APIClient struct {
 
 // NewAPIClient creates a new API client with the given configuration.
 func NewAPIClient(baseURL, authToken string, timeout time.Duration, logger Logger) *APIClient {
-	return &APIClient{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		client: &http.Client{
-			Timeout: timeout,
-		},
-		authToken: authToken,
-		config: Config{
-			BaseURL:        baseURL,
-			RequestTimeout: timeout,
-			LogRequests:    false,
-			LogResponses:   false,
-		},
-		logger: logger,
+	config := Config{
+		BaseURL:        baseURL,
+		RequestTimeout: timeout,
+		LogRequests:    false,
+		LogResponses:   false,
 	}
+
+	return NewAPIClientWithConfig(config, authToken, logger)
 }
 
 // NewAPIClientWithConfig creates a new API client with the given configuration struct.
@@ -230,10 +224,10 @@ func (c *APIClient) DoRequest(ctx context.Context, method, path string, body io.
 }
 
 // ListResource is a type-safe generic helper for list operations.
-// Type parameter T should be the concrete response type (e.g., []openapi.Cluster).
-// Example usage: ListResource[[]openapi.Cluster](ctx, client, path, config).
-func ListResource[T any](ctx context.Context, c *APIClient, path string, config ResponseHandlerConfig) (T, error) {
-	var zero T
+// Type parameter T should be the element type (e.g., openapi.Cluster).
+// Example usage: ListResource[openapi.Cluster](ctx, client, path, config).
+func ListResource[T any](ctx context.Context, c *APIClient, path string, config ResponseHandlerConfig) ([]T, error) {
+	var zero []T
 	//nolint:bodyclose // response body is closed in DoRequest
 	resp, respBody, err := c.DoRequest(ctx, http.MethodGet, path, nil, 0)
 	if err != nil {
