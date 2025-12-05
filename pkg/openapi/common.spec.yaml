@@ -27,22 +27,14 @@ components:
           description: A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
           type: string
           enum:
-          # Defined by OAuth 2.02
           - invalid_request
-          - unauthorized_client
-          - access_denied
-          - unsupported_response_type
-          - invalid_scope
           - server_error
-          - temporarily_unavailable
-          - invalid_client
-          - invalid_grant
-          - unsupported_grant_type
-          # Proprietary
+          - access_denied
           - not_found
           - conflict
           - method_not_allowed
           - unsupported_media_type
+          - request_entity_too_large
           - forbidden
         error_description:
           description: Verbose message describing the error.

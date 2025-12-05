@@ -23,8 +23,6 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
-
-	"github.com/unikorn-cloud/core/pkg/server/errors"
 )
 
 // Schema abstracts schema access and validation.
@@ -65,7 +63,7 @@ func NewSchema(get SchemaGetter) (*Schema, error) {
 func (s *Schema) FindRoute(r *http.Request) (*routers.Route, map[string]string, error) {
 	route, params, err := s.router.FindRoute(r)
 	if err != nil {
-		return nil, nil, errors.OAuth2ServerError("unable to find route").WithError(err)
+		return nil, nil, err
 	}
 
 	return route, params, nil
