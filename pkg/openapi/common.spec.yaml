@@ -10,7 +10,7 @@ components:
       in: query
       description: |-
         A set of tags to match against resources in the form "name=value",
-        thus when encoded you get "?tag=foo%3Dcat&bar%3Ddog".
+        thus when encoded you get "?tag=foo%3Dcat&tag=bar%3Ddog".
       schema:
         type: array
         items:
