@@ -89,12 +89,12 @@ func glob(extension string) ([]string, error) {
 	return files, nil
 }
 
-//nolint:cyclop
-func checkFirstComment(comment *ast.Comment) error {
-	if comment.Slash != 1 {
-		return fmt.Errorf("%w: first comment starts at %d, expected 1", errFirstCommentNotLicense, comment.Slash)
-	}
+func commentIsGoBuild(comment *ast.Comment) bool {
+	return strings.HasPrefix(comment.Text, "//go:build")
+}
 
+//nolint:cyclop
+func checkLicense(comment *ast.Comment) error {
 	if !strings.HasPrefix(comment.Text, "/*") {
 		return fmt.Errorf("%w: first comment doesn't start with a C style comment", errFirstCommentNotLicense)
 	}
@@ -163,7 +163,13 @@ func checkGoLicenseInComments(path string, file *ast.File) error {
 		return fmt.Errorf("%w: %s", errNoComments, path)
 	}
 
-	return checkFirstComment(file.Comments[0].List[0])
+	index := 0
+
+	if commentIsGoBuild(file.Comments[0].List[0]) {
+		index = 1
+	}
+
+	return checkLicense(file.Comments[index].List[0])
 }
 
 // checkGoLicenseFile parses a source file and checks there is a license header in there.
