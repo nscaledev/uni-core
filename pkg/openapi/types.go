@@ -53,6 +53,49 @@ type ErrorError string
 // indexed in the database.
 type KubernetesLabelValue = string
 
+// MaybeProjectScopedResourceReadMetadata defines model for maybeProjectScopedResourceReadMetadata.
+type MaybeProjectScopedResourceReadMetadata struct {
+	// CreatedBy The user who created the resource.
+	CreatedBy *string `json:"createdBy,omitempty"`
+
+	// CreationTime The time the resource was created.
+	CreationTime time.Time `json:"creationTime"`
+
+	// DeletionTime The time the resource was deleted.
+	DeletionTime *time.Time `json:"deletionTime,omitempty"`
+
+	// Description The resource description, this optionally augments the name with more context.
+	Description *string `json:"description,omitempty"`
+
+	// HealthStatus The health state of a resource.
+	HealthStatus ResourceHealthStatus `json:"healthStatus"`
+
+	// Id The unique resource ID.
+	Id string `json:"id"`
+
+	// ModifiedBy The user who updated the resource.
+	ModifiedBy *string `json:"modifiedBy,omitempty"`
+
+	// ModifiedTime The time a resource was updated.
+	ModifiedTime *time.Time `json:"modifiedTime,omitempty"`
+
+	// Name A valid Kubernetes label value, typically used for resource names that can be
+	// indexed in the database.
+	Name KubernetesLabelValue `json:"name"`
+
+	// OrganizationId The organization identifier the resource belongs to.
+	OrganizationId string `json:"organizationId"`
+
+	// ProjectId The project identifier the resource belongs to.
+	ProjectId *string `json:"projectId,omitempty"`
+
+	// ProvisioningStatus The provisioning state of a resource.
+	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
+
+	// Tags A list of tags.
+	Tags *TagList `json:"tags,omitempty"`
+}
+
 // OrganizationScopedResourceReadMetadata defines model for organizationScopedResourceReadMetadata.
 type OrganizationScopedResourceReadMetadata struct {
 	// CreatedBy The user who created the resource.

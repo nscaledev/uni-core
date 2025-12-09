@@ -171,6 +171,18 @@ components:
           projectId:
             description: The project identifier the resource belongs to.
             type: string
+    maybeProjectScopedResourceReadMetadata:
+      description: |-
+        Metadata required for resource reads that may be scoped to a project.
+        The projectId is optional and included only if the resource belongs to
+        a specific project.
+      allOf:
+      - $ref: '#/components/schemas/organizationScopedResourceReadMetadata'
+      - type: object
+        properties:
+          projectId:
+            description: The project identifier the resource belongs to.
+            type: string
     resourceWriteMetadata:
       $ref: '#/components/schemas/resourceMetadata'
   responses:
