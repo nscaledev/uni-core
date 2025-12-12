@@ -52,4 +52,7 @@ var (
 
 	// ErrTypeConversion is thrown when a type assertion goes wrong.
 	ErrTypeConversion = errors.New("type conversion error")
+
+	// ErrResourceNotFound is thrown when a resource cannot be found.
+	ErrResourceNotFound = errors.New("resource not found")
 )
