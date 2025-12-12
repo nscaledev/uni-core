@@ -36,9 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-var (
-	ErrAnnotation = errors.New("a required annotation was missing")
-)
+var ErrMissingOrganizationLabel = errors.New("missing organization label on resource")
 
 // convertStatusCondition translates from Kubernetes status conditions to API ones.
 func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus {
@@ -184,6 +182,35 @@ func ProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList)
 	_ = json.Unmarshal(tempJSON, &out)
 
 	return out
+}
+
+func MaybeProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) (openapi.MaybeProjectScopedResourceReadMetadata, error) {
+	baseMetadata := ResourceReadMetadata(in, tags)
+
+	bs, err := json.Marshal(baseMetadata)
+	if err != nil {
+		return openapi.MaybeProjectScopedResourceReadMetadata{}, err
+	}
+
+	var out openapi.MaybeProjectScopedResourceReadMetadata
+	if err = json.Unmarshal(bs, &out); err != nil {
+		return openapi.MaybeProjectScopedResourceReadMetadata{}, err
+	}
+
+	labels := in.GetLabels()
+
+	organizationID, ok := labels[constants.OrganizationLabel]
+	if !ok {
+		return openapi.MaybeProjectScopedResourceReadMetadata{}, ErrMissingOrganizationLabel
+	}
+
+	out.OrganizationId = organizationID
+
+	if temp, ok := labels[constants.ProjectLabel]; ok {
+		out.ProjectId = ptr.To(temp)
+	}
+
+	return out, nil
 }
 
 // ObjectMetadata implements a builder pattern.
