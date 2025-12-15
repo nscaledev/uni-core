@@ -35,6 +35,7 @@ components:
           - method_not_allowed
           - unsupported_media_type
           - request_entity_too_large
+          - unprocessable_content
           - forbidden
         error_description:
           description: Verbose message describing the error.

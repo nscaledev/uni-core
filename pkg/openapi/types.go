@@ -17,6 +17,7 @@ const (
 	NotFound              ErrorError = "not_found"
 	RequestEntityTooLarge ErrorError = "request_entity_too_large"
 	ServerError           ErrorError = "server_error"
+	UnprocessableContent  ErrorError = "unprocessable_content"
 	UnsupportedMediaType  ErrorError = "unsupported_media_type"
 )
 
