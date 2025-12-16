@@ -67,6 +67,26 @@ test-unit:
 	go test -coverpkg ./... -coverprofile cover.out ./...
 	go tool cover -html cover.out -o cover.html
 
+# Start local Pact Broker
+.PHONY: pact-broker-start
+pact-broker-start:
+	docker-compose -f docker-compose.pact-broker.yml up -d
+
+# Stop local Pact Broker
+.PHONY: pact-broker-stop
+pact-broker-stop:
+	docker-compose -f docker-compose.pact-broker.yml down
+
+# View Pact Broker logs
+.PHONY: pact-broker-logs
+pact-broker-logs:
+	docker-compose -f docker-compose.pact-broker.yml logs -f
+
+# Stop Pact Broker and remove all data
+.PHONY: pact-broker-clean
+pact-broker-clean:
+	docker-compose -f docker-compose.pact-broker.yml down -v
+
 pkg/openapi/types.go: pkg/openapi/common.spec.yaml
 	@go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OPENAPI_CODEGEN_VERSION)
 	oapi-codegen -generate types,skip-prune -package openapi -o $@ $<
