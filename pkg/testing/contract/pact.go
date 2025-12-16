@@ -37,7 +37,9 @@ type PactConfig struct {
 // This is a thin wrapper around pact-go/v2 that integrates with Ginkgo.
 func NewPact(config PactConfig) (*consumer.V2HTTPMockProvider, error) {
 	// Set pact logging to error level to reduce noise in test output
-	log.SetLogLevel("ERROR")
+	if err := log.SetLogLevel("ERROR"); err != nil {
+		return nil, fmt.Errorf("setting pact log level: %w", err)
+	}
 
 	pact, err := consumer.NewV2Pact(consumer.MockHTTPProviderConfig{
 		Consumer: config.Consumer,
