@@ -278,3 +278,47 @@ pact.AddInteraction().
 
 See the [Pact Go documentation](https://github.com/pact-foundation/pact-go) for detailed usage.
 
+### Deploying Pact Broker to Cluster (One-Time Setup)
+
+For shared development and UAT environments, deploy the Pact Broker to your Kubernetes cluster. This is typically a one-time infrastructure setup operation.
+
+**Prerequisites**:
+- Cluster access configured with `kubectl`
+- Helm 3 installed
+
+**Deploy to Development Cluster**:
+```bash
+# Deploy to nks-dev-glo1 cluster
+make pact-broker-deploy-dev
+```
+
+**Deploy to UAT Cluster**:
+```bash
+# Deploy to UAT cluster
+make pact-broker-deploy-uat
+```
+
+**Verify Deployment**:
+```bash
+# Check deployment status
+make pact-broker-status
+
+# View logs
+make pact-broker-logs-k8s
+```
+
+**Cluster URLs**:
+- **Dev**: https://pact.nks-dev.glo1.nscale.com (username: `pact`, password: `pact`)
+- **UAT**: https://pact.nks-uat.glo1.nscale.com (username: `pact`, password: `pact`)
+
+**Update Existing Deployment**:
+```bash
+# Update dev deployment
+make pact-broker-upgrade-dev
+
+# Update UAT deployment
+make pact-broker-upgrade-uat
+```
+
+The deployment includes PostgreSQL for storage, ingress with TLS certificates, and automatic database cleanup configured per environment.
+
