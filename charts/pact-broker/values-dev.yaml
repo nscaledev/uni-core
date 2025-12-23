@@ -1,0 +1,56 @@
+# Development environment overrides for unikorn-pact-broker
+# Usage: helm upgrade --install pact-broker . --values values-dev.yaml
+
+pact-broker:
+  broker:
+    # following the same pattern as the API for the URL and hosts
+    baseUrl: "https://pact.nks-dev.glo1.nscale.com"
+
+    config:
+      basicAuth:
+        enabled: true
+        username: pact
+        password: "pact"
+      # We can allow contract modification in development for testing
+      allowDangerousContractModification: true
+      databaseClean:
+        enabled: true
+        mode: embedded
+        keepVersionSelectors:
+          - maxAge: 30
+        schedule: "0 3 * * *"  # Run at 3 AM daily
+  database:
+    postgresql:
+      enabled: true
+      auth:
+        password: "postgres"
+        database: pactbroker
+        username: postgres
+      persistence:
+        enabled: true
+        size: 5Gi
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-staging
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts:
+      - host: pact.nks-dev.glo1.nscale.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: pact-broker-dev-tls
+        hosts:
+          - pact.nks-dev.glo1.nscale.com
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+  replicaCount: 1
