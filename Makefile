@@ -176,6 +176,7 @@ lint: $(GENDIR)
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)
 	$(GOBIN)/golangci-lint run ./...
 	helm lint --strict charts/core
+	helm dependency build charts/pact-broker
 	helm lint --strict charts/pact-broker
 
 # Validate the server OpenAPI schema is legit.
