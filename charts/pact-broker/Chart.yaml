@@ -3,9 +3,10 @@ name: unikorn-pact-broker
 description: Pact Broker deployment for contract testing across Unikorn services
 type: application
 version: 0.1.0
-appVersion: 2.117.0
+appVersion: "2.117.0"
 icon: https://docs.pact.io/img/pact-logo.svg
+
 dependencies:
-- name: pact-broker
-  version: 0.2.1
-  repository: https://pact-foundation.github.io/pact-broker-chart/
+  - name: pact-broker
+    version: 5.4.1
+    repository: https://pact-foundation.github.io/pact-broker-chart/

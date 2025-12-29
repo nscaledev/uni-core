@@ -1,137 +1,14 @@
-# Default values for unikorn-pact-broker
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
-
-# Override values for the pact-broker subchart
 pact-broker:
-  # Broker configuration
   broker:
-    # This is used in webhooks and for generating links
-    baseUrl: ""
-
     config:
-      # Basic authentication configuration
       basicAuth:
-        enabled: true
-        username: pact
-        # Password should be set via --set or in environment-specific values files
-        password: ""
-        # Alternatively, use an existing secret
-        existingSecret: ""
-        usernameKey: username
-        passwordKey: password
+        enabled: false
 
-      # Automatic database cleanup configuration
-      databaseClean:
-        enabled: true
-        # Mode: embedded (runs in broker) or lambda (AWS Lambda)
-        mode: embedded
-        # Keep version published in last N days
-        keepVersionSelectors:
-          - maxAge: 90
-        # Cleanup schedule (cron format)
-        schedule: "15 2 * * *"
-
-      # Allow dangerous contract modification (DISABLE in production)
-      allowDangerousContractModification: false
-      enablePublicBadgeAccess: true
-
-  # Database configuration
   database:
-    # Use bundled PostgreSQL (simple setup)
-    postgresql:
-      enabled: true
-      auth:
-        # Leave empty for auto-generated password
-        password: ""
-        # Database name
-        database: pactbroker
-        # Postgres user
-        username: postgres
-
-      # Persistence for PostgreSQL
-      persistence:
-        enabled: true
-        size: 10Gi
-        # storageClass: ""  # Uncomment to use specific storage class
-
-    # External database configuration (disable postgresql.enabled if using this)
-    externalDatabase:
-      enabled: false
-      config:
-        host: ""
-        port: 5432
-        adapter: postgres
-        databaseName: pactbroker
-        auth:
-          username: ""
-          password: ""
-          existingSecret: ""
-
-  # Ingress configuration
-  ingress:
-    enabled: false
-    className: nginx
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt-prod
-      # Add other annotations as needed (e.g., for authentication)
-    hosts:
-      - host: pact-broker.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-    tls:
-      - secretName: pact-broker-tls
-        hosts:
-          - pact-broker.example.com
-
-  # Resource limits
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 1Gi
-    requests:
-      cpu: 100m
-      memory: 256Mi
-
-  # Replica count
-  replicaCount: 1
-
-  # Service configuration
-  service:
-    type: ClusterIP
-    port: 80
-    targetPort: 9292
-
-  # Pod security context
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-    fsGroup: 1000
-
-  # Security context
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
-    readOnlyRootFilesystem: false
-
-  # Liveness and readiness probes
-  livenessProbe:
-    httpGet:
-      path: /diagnostic/status/heartbeat
-      port: 9292
-    initialDelaySeconds: 60
-    periodSeconds: 30
-    timeoutSeconds: 10
-    failureThreshold: 3
-
-  readinessProbe:
-    httpGet:
-      path: /diagnostic/status/heartbeat
-      port: 9292
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 3
+    adapter: postgres
+    host: pb-db-postgresql
+    port: "5432"
+    databaseName: pactbroker
+    auth:
+      username: pactbroker
+      password: pactbrokerpass
