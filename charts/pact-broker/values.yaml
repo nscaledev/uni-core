@@ -1,14 +1,39 @@
 pact-broker:
   broker:
     config:
+      # baseUrl: set via environment-specific values
+
       basicAuth:
-        enabled: false
+        enabled: true
+        allowPublicRead: false
+        publicHeartbeat: true
+
+        writeUser:
+          existingSecret: pact-broker-auth-write
+          existingSecretUsernameKey: username
+          existingSecretPasswordKey: password
+
+        readUser:
+          existingSecret: pact-broker-auth-read
+          existingSecretUsernameKey: username
+          existingSecretPasswordKey: password
 
   database:
     adapter: postgres
-    host: pb-db-postgresql
+    host: "pb-db-postgresql.pact-broker.svc.cluster.local"
     port: "5432"
-    databaseName: pactbroker
+    databaseName: "pactbroker"
     auth:
-      username: pactbroker
-      # password: leave unset - use existingSecret in environment-specific values
+      username: "pactbroker"
+      existingSecret: "pact-broker-db"
+      existingSecretPasswordKey: "password"
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    # host: set via environment-specific values
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    tls:
+      enabled: true
+      secretName: "pact-broker-tls"

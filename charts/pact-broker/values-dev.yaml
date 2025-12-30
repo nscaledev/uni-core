@@ -1,39 +1,8 @@
+# Environment-specific overrides for DEV
 pact-broker:
   broker:
     config:
       baseUrl: "https://pact.nks-dev.glo1.nscale.com"
 
-      basicAuth:
-        enabled: true
-        allowPublicRead: false
-        publicHeartbeat: true
-
-        writeUser:
-          existingSecret: pact-broker-auth-write
-          existingSecretUsernameKey: username
-          existingSecretPasswordKey: password
-
-        readUser:
-          existingSecret: pact-broker-auth-read
-          existingSecretUsernameKey: username
-          existingSecretPasswordKey: password
-
-  database:
-    adapter: postgres
-    host: "pb-db-postgresql.pact-broker.svc.cluster.local"
-    port: "5432"
-    databaseName: "pactbroker"
-    auth:
-      username: "pactbroker"
-      existingSecret: "pact-broker-db"
-      existingSecretPasswordKey: "password"
-
   ingress:
-    enabled: true
-    className: "nginx"
     host: "pact.nks-dev.glo1.nscale.com"
-    annotations:
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    tls:
-      enabled: true
-      secretName: "pact-broker-tls"
