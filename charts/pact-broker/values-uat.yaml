@@ -1,0 +1,8 @@
+# Environment-specific overrides for UAT
+pact-broker:
+  broker:
+    config:
+      baseUrl: "https://pact.nks-stg.europe-west2.nscale.com"
+
+  ingress:
+    host: "pact.nks-stg.europe-west2.nscale.com"

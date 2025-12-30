@@ -2,6 +2,8 @@
 /sboms
 /charts/core/Chart.lock
 /charts/core/charts
+/charts/pact-broker/charts
+/charts/pact-broker/Chart.lock
 *.swp
 cover.out
 cover.html

@@ -204,3 +204,121 @@ The behavior is the same when deprovisioning applications, returning `ErrYield` 
 You can enable a feature called "background deletion", which assumes success.
 This is typically used when destroying a remote cluster, as the deletion of said cluster will also result in the deletion of all resources, and Argo CD will eventually remove applications referring to a non-existent remote cluster.
 
+## Contract Testing with Pact
+
+This repository provides a Pact Broker and testing framework for consumer-driven contract testing across Unikorn services.
+
+### Pact Broker
+
+A local Pact Broker is available for development and testing:
+
+```bash
+# Start the broker
+make pact-broker-start
+
+# Stop the broker
+make pact-broker-stop
+
+# View logs
+make pact-broker-logs
+
+# Clean up all data
+make pact-broker-clean
+```
+
+**Access**: http://localhost:9292 (username: `pact`, password: `pact`)
+
+The broker includes PostgreSQL for storage and persists data in a Docker volume.
+
+### Using the Framework
+
+The `pkg/testing/contract` package provides a lightweight wrapper around Pact Go v2 for writing consumer contract tests.
+
+**Prerequisites**: Install the Pact FFI library for your platform:
+
+```bash
+# macOS (Apple Silicon)
+mkdir -p ~/Library/pact
+curl -fL https://github.com/pact-foundation/pact-reference/releases/download/libpact_ffi-v0.4.22/libpact_ffi-macos-aarch64.dylib.gz | \
+  gunzip > ~/Library/pact/libpact_ffi.dylib
+chmod +x ~/Library/pact/libpact_ffi.dylib
+
+# Linux (x86_64)
+sudo mkdir -p /usr/local/lib
+curl -fL https://github.com/pact-foundation/pact-reference/releases/download/libpact_ffi-v0.4.22/libpact_ffi-linux-x86_64.so.gz | \
+  gunzip | sudo tee /usr/local/lib/libpact_ffi.so > /dev/null
+sudo chmod +x /usr/local/lib/libpact_ffi.so
+```
+
+**Basic Usage**:
+
+```go
+import (
+    "github.com/unikorn-cloud/core/pkg/testing/contract"
+    "github.com/pact-foundation/pact-go/v2/consumer"
+    "github.com/pact-foundation/pact-go/v2/matchers"
+)
+
+// Create a pact
+pact, err := contract.NewPact(contract.PactConfig{
+    Consumer: "my-consumer",
+    Provider: "my-provider",
+    PactDir:  "./pacts",
+})
+
+// Define interactions using standard Pact Go v2 API
+pact.AddInteraction().
+    Given("resource exists").
+    UponReceiving("a request").
+    WithRequest("GET", "/api/resource").
+    WillRespondWith(200, func(b *consumer.V2ResponseBuilder) {
+        b.JSONBody(matchers.String("example"))
+    })
+```
+
+See the [Pact Go documentation](https://github.com/pact-foundation/pact-go) for detailed usage.
+
+### Deploying Pact Broker to Cluster (One-Time Setup)
+
+For shared development and UAT environments, deploy the Pact Broker to your Kubernetes cluster. This is typically a one-time infrastructure setup operation.
+
+**Prerequisites**:
+- Cluster access configured with `kubectl`
+- Helm 3 installed
+
+**Deploy to Development Cluster**:
+```bash
+# Deploy to nks-dev-glo1 cluster
+make pact-broker-deploy-dev
+```
+
+**Deploy to UAT Cluster**:
+```bash
+# Deploy to UAT cluster
+make pact-broker-deploy-uat
+```
+
+**Verify Deployment**:
+```bash
+# Check deployment status
+make pact-broker-status
+
+# View logs
+make pact-broker-logs-k8s
+```
+
+**Cluster URLs**:
+- **Dev**: https://pact.nks-dev.glo1.nscale.com (username: `pact`, password: `pact`)
+- **UAT**: https://pact.nks-uat.glo1.nscale.com (username: `pact`, password: `pact`)
+
+**Update Existing Deployment**:
+```bash
+# Update dev deployment
+make pact-broker-upgrade-dev
+
+# Update UAT deployment
+make pact-broker-upgrade-uat
+```
+
+The deployment includes PostgreSQL for storage, ingress with TLS certificates, and automatic database cleanup configured per environment.
+
