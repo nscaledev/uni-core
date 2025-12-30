@@ -96,41 +96,41 @@ pact-broker-deps:
 .PHONY: pact-broker-deploy-dev
 pact-broker-deploy-dev: pact-broker-deps
 	helm upgrade --install pact-broker charts/pact-broker \
-		--namespace pact --create-namespace \
+		--namespace pact-broker --create-namespace \
 		--values charts/pact-broker/values-dev.yaml
 
 # Deploy Pact Broker to Kubernetes cluster (UAT environment)
 .PHONY: pact-broker-deploy-uat
 pact-broker-deploy-uat: pact-broker-deps
 	helm upgrade --install pact-broker charts/pact-broker \
-		--namespace pact --create-namespace \
+		--namespace pact-broker --create-namespace \
 		--values charts/pact-broker/values-uat.yaml
 
 # Upgrade Pact Broker deployment (dev)
 .PHONY: pact-broker-upgrade-dev
 pact-broker-upgrade-dev: pact-broker-deps
 	helm upgrade pact-broker charts/pact-broker \
-		--namespace pact \
+		--namespace pact-broker \
 		--values charts/pact-broker/values-dev.yaml
 
 # Upgrade Pact Broker deployment (UAT)
 .PHONY: pact-broker-upgrade-uat
 pact-broker-upgrade-uat: pact-broker-deps
 	helm upgrade pact-broker charts/pact-broker \
-		--namespace pact \
+		--namespace pact-broker \
 		--values charts/pact-broker/values-uat.yaml
 
 # Check Pact Broker deployment status
 .PHONY: pact-broker-status
 pact-broker-status:
 	@echo "=== Helm Release Status ==="
-	@helm status pact-broker -n pact
+	@helm status pact-broker -n pact-broker
 	@echo ""
 	@echo "=== Pod Status ==="
-	@kubectl get pods -n pact
+	@kubectl get pods -n pact-broker
 	@echo ""
 	@echo "=== Ingress Status ==="
-	@kubectl get ingress -n pact
+	@kubectl get ingress -n pact-broker
 
 # View Pact Broker Kubernetes logs
 .PHONY: pact-broker-logs-k8s
