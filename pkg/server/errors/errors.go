@@ -176,6 +176,10 @@ func HTTPRequestEntityTooLarge(a ...any) *Error {
 	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, a...)
 }
 
+func HTTPUnprocessableContent(a ...any) *Error {
+	return newError(http.StatusUnprocessableEntity, openapi.UnprocessableContent, a...)
+}
+
 // OAuth2InvalidRequest indicates a client error.
 func OAuth2InvalidRequest(a ...any) *Error {
 	return newError(http.StatusBadRequest, openapi.InvalidRequest, a...)

@@ -162,6 +162,12 @@ func TestWithContext(t *testing.T) {
 			errorString: openapi.InvalidRequest,
 		},
 		{
+			name:        "UnprocessableContent",
+			f:           errors.HTTPUnprocessableContent,
+			code:        http.StatusUnprocessableEntity,
+			errorString: openapi.UnprocessableContent,
+		},
+		{
 			name:        "AccessDenied",
 			f:           errors.OAuth2AccessDenied,
 			code:        http.StatusUnauthorized,
