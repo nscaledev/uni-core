@@ -20,7 +20,6 @@ package conversion
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
 	"github.com/unikorn-cloud/core/pkg/openapi"
+	"github.com/unikorn-cloud/core/pkg/server/conversion/internal"
 	"github.com/unikorn-cloud/core/pkg/util"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,72 +36,6 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-var (
-	ErrAnnotation = errors.New("a required annotation was missing")
-)
-
-// convertStatusCondition translates from Kubernetes status conditions to API ones.
-func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus {
-	// We set the status after a reconcile, so this allows us to
-	// reflect the correct state to the user immediately.
-	if in.GetDeletionTimestamp() != nil {
-		return openapi.ResourceProvisioningStatusDeprovisioning
-	}
-
-	// Not a resource with status conditions, consider it provisioned.
-	reader, ok := in.(unikornv1.StatusConditionReader)
-	if !ok {
-		return openapi.ResourceProvisioningStatusProvisioned
-	}
-
-	// No condition yet, it's unknown.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionAvailable)
-	if err != nil {
-		return openapi.ResourceProvisioningStatusUnknown
-	}
-
-	//nolint:exhaustive
-	switch condition.Reason {
-	case unikornv1.ConditionReasonProvisioning:
-		return openapi.ResourceProvisioningStatusProvisioning
-	case unikornv1.ConditionReasonProvisioned:
-		return openapi.ResourceProvisioningStatusProvisioned
-	case unikornv1.ConditionReasonErrored:
-		return openapi.ResourceProvisioningStatusError
-	case unikornv1.ConditionReasonDeprovisioning:
-		return openapi.ResourceProvisioningStatusDeprovisioning
-	}
-
-	return openapi.ResourceProvisioningStatusUnknown
-}
-
-// convertHealthCondition translates from Kubernetes heath conditions to API ones.
-func convertHealthCondition(in any) openapi.ResourceHealthStatus {
-	// Not a resource with status conditions, consider it healthy.
-	reader, ok := in.(unikornv1.StatusConditionReader)
-	if !ok {
-		return openapi.ResourceHealthStatusHealthy
-	}
-
-	// No condition yet, it's unknown.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionHealthy)
-	if err != nil {
-		return openapi.ResourceHealthStatusUnknown
-	}
-
-	//nolint:exhaustive
-	switch condition.Reason {
-	case unikornv1.ConditionReasonHealthy:
-		return openapi.ResourceHealthStatusHealthy
-	case unikornv1.ConditionReasonDegraded:
-		return openapi.ResourceHealthStatusDegraded
-	case unikornv1.ConditionReasonErrored:
-		return openapi.ResourceHealthStatusError
-	}
-
-	return openapi.ResourceHealthStatusUnknown
-}
 
 // ResourceReadMetadata extracts generic metadata from a resource for GET APIs.
 func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.ResourceReadMetadata {
@@ -112,8 +46,8 @@ func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.Reso
 		Id:                 in.GetName(),
 		Name:               labels[constants.NameLabel],
 		CreationTime:       in.GetCreationTimestamp().Time,
-		ProvisioningStatus: convertStatusCondition(in),
-		HealthStatus:       convertHealthCondition(in),
+		ProvisioningStatus: internal.ConvertStatusCondition(in),
+		HealthStatus:       internal.ConvertHealthCondition(in),
 	}
 
 	if v, ok := annotations[constants.DescriptionAnnotation]; ok {
@@ -146,7 +80,7 @@ func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.Reso
 	return out
 }
 
-// OrganizationScopedResourceReadMetadata extracts organization scoped metdata from a resource
+// OrganizationScopedResourceReadMetadata extracts organization scoped metadata from a resource
 // for GET APIS.
 //
 //nolint:errchkjson
@@ -166,7 +100,7 @@ func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.Tag
 	return out
 }
 
-// ProjectScopedResourceReadMetadata extracts project scoped metdata from a resource for
+// ProjectScopedResourceReadMetadata extracts project scoped metadata from a resource for
 // GET APIs.
 //
 //nolint:errchkjson
