@@ -1,6 +1,7 @@
 /*
 Copyright 2022-2024 EscherCloud.
 Copyright 2024-2025 the Unikorn Authors.
+Copyright 2026 Nscale.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -173,6 +174,10 @@ func HTTPConflict() *Error {
 
 func HTTPRequestEntityTooLarge(a ...any) *Error {
 	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, a...)
+}
+
+func HTTPUnprocessableContent(a ...any) *Error {
+	return newError(http.StatusUnprocessableEntity, openapi.UnprocessableContent, a...)
 }
 
 // OAuth2InvalidRequest indicates a client error.

@@ -1,6 +1,8 @@
 /*
 Copyright 2022-2024 EscherCloud.
 Copyright 2024-2025 the Unikorn Authors.
+Copyright 2026 Nscale.
+Copyright 2026 Ncale.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -149,7 +151,7 @@ func checkLicense(comment *ast.Comment) error {
 		return fmt.Errorf("%w: copyright doesn't contain this year %d", errFirstCommentNotLicense, year)
 	}
 
-	if matches[3] != "the Unikorn Authors." {
+	if matches[3] != "Nscale." {
 		return fmt.Errorf("%w: copyright isn't for the right organization '%s'", errFirstCommentNotLicense, matches[3])
 	}
 
@@ -225,7 +227,7 @@ func checkGoLicense() error {
 
 	for _, path := range paths {
 		if ok, err := ignoreFile(path); err != nil {
-			fmt.Printf("%s: %s", path, err.Error())
+			fmt.Printf("%s: %s\n", path, err.Error())
 
 			hasErrors = true
 		} else if ok {
@@ -233,7 +235,7 @@ func checkGoLicense() error {
 		}
 
 		if err := checkGoLicenseFile(path); err != nil {
-			fmt.Printf("%s: %s", path, err.Error())
+			fmt.Printf("%s: %s\n", path, err.Error())
 
 			hasErrors = true
 		}

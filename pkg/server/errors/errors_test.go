@@ -1,5 +1,6 @@
 /*
 Copyright 2025 the Unikorn Authors.
+Copyright 2026 Nscale.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -159,6 +160,12 @@ func TestWithContext(t *testing.T) {
 			f:           errors.OAuth2InvalidRequest,
 			code:        http.StatusBadRequest,
 			errorString: openapi.InvalidRequest,
+		},
+		{
+			name:        "UnprocessableContent",
+			f:           errors.HTTPUnprocessableContent,
+			code:        http.StatusUnprocessableEntity,
+			errorString: openapi.UnprocessableContent,
 		},
 		{
 			name:        "AccessDenied",

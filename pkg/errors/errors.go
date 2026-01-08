@@ -1,6 +1,7 @@
 /*
 Copyright 2022-2024 EscherCloud.
 Copyright 2024-2025 the Unikorn Authors.
+Copyright 2026 Nscale.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -55,4 +56,7 @@ var (
 
 	// ErrResourceNotFound is thrown when a resource cannot be found.
 	ErrResourceNotFound = errors.New("resource not found")
+
+	// ErrConflict is thrown when a resource conflicts with another.
+	ErrConflict = errors.New("resource conflict")
 )
