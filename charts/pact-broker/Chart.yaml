@@ -10,3 +10,8 @@ dependencies:
   - name: pact-broker
     version: 5.4.1
     repository: https://pact-foundation.github.io/pact-broker-chart/
+  - name: postgresql
+    version: 16.4.2
+    repository: https://charts.bitnami.com/bitnami
+    alias: pb-db
+    condition: postgresql.enabled

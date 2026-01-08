@@ -97,6 +97,7 @@ pact-broker-deps:
 pact-broker-deploy-dev: pact-broker-deps
 	helm upgrade --install pact-broker charts/pact-broker \
 		--namespace pact-broker --create-namespace \
+		--values charts/pact-broker/values.yaml \
 		--values charts/pact-broker/values-dev.yaml
 
 # Deploy Pact Broker to Kubernetes cluster (UAT environment)
@@ -104,6 +105,7 @@ pact-broker-deploy-dev: pact-broker-deps
 pact-broker-deploy-uat: pact-broker-deps
 	helm upgrade --install pact-broker charts/pact-broker \
 		--namespace pact-broker --create-namespace \
+		--values charts/pact-broker/values.yaml \
 		--values charts/pact-broker/values-uat.yaml
 
 # Upgrade Pact Broker deployment (dev)
@@ -111,6 +113,7 @@ pact-broker-deploy-uat: pact-broker-deps
 pact-broker-upgrade-dev: pact-broker-deps
 	helm upgrade pact-broker charts/pact-broker \
 		--namespace pact-broker \
+		--values charts/pact-broker/values.yaml \
 		--values charts/pact-broker/values-dev.yaml
 
 # Upgrade Pact Broker deployment (UAT)
@@ -118,6 +121,7 @@ pact-broker-upgrade-dev: pact-broker-deps
 pact-broker-upgrade-uat: pact-broker-deps
 	helm upgrade pact-broker charts/pact-broker \
 		--namespace pact-broker \
+		--values charts/pact-broker/values.yaml \
 		--values charts/pact-broker/values-uat.yaml
 
 # Check Pact Broker deployment status

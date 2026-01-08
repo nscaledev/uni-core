@@ -53,3 +53,25 @@ func NewPact(config PactConfig) (*consumer.V2HTTPMockProvider, error) {
 
 	return pact, nil
 }
+
+// NewV4Pact creates a new V4 Pact mock provider for consumer contract testing.
+// V4 Pacts support state parameters and other advanced features.
+// This is a thin wrapper around pact-go/v2 that integrates with Ginkgo.
+func NewV4Pact(config PactConfig) (*consumer.V4HTTPMockProvider, error) {
+	// Set pact logging to error level to reduce noise in test output
+	if err := log.SetLogLevel("ERROR"); err != nil {
+		return nil, fmt.Errorf("setting pact log level: %w", err)
+	}
+
+	pact, err := consumer.NewV4Pact(consumer.MockHTTPProviderConfig{
+		Consumer: config.Consumer,
+		Provider: config.Provider,
+		PactDir:  config.PactDir,
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("creating pact provider: %w", err)
+	}
+
+	return pact, nil
+}

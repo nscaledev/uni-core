@@ -20,7 +20,7 @@ pact-broker:
 
   database:
     adapter: postgres
-    host: "pb-db-postgresql.pact-broker.svc.cluster.local"
+    host: "pact-broker-pb-db.pact-broker.svc.cluster.local"
     port: "5432"
     databaseName: "pactbroker"
     auth:
@@ -37,3 +37,23 @@ pact-broker:
     tls:
       enabled: true
       secretName: "pact-broker-tls"
+
+# PostgreSQL database configuration
+pb-db:
+  enabled: true
+  image:
+    tag: "latest"  # Bitnami now uses unversioned tags for Secure Images
+  auth:
+    username: "pactbroker"
+    database: "pactbroker"
+    existingSecret: "pact-broker-db"
+    secretKeys:
+      adminPasswordKey: "postgres-password"
+      userPasswordKey: "password"
+  primary:
+    service:
+      nameOverride: "pb-db-postgresql"
+    persistence:
+      enabled: true
+      size: 8Gi
+      # storageClass: set via environment-specific values if needed
