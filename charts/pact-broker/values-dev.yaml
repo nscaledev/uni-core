@@ -1,0 +1,8 @@
+# Environment-specific overrides for DEV
+pact-broker:
+  broker:
+    config:
+      baseUrl: "https://pact.nks-dev.glo1.nscale.com"
+
+  ingress:
+    host: "pact.nks-dev.glo1.nscale.com"

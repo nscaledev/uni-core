@@ -1,0 +1,59 @@
+pact-broker:
+  broker:
+    config:
+      # baseUrl: set via environment-specific values
+
+      basicAuth:
+        enabled: true
+        allowPublicRead: false
+        publicHeartbeat: true
+
+        writeUser:
+          existingSecret: pact-broker-auth-write
+          existingSecretUsernameKey: username
+          existingSecretPasswordKey: password
+
+        readUser:
+          existingSecret: pact-broker-auth-read
+          existingSecretUsernameKey: username
+          existingSecretPasswordKey: password
+
+  database:
+    adapter: postgres
+    host: "pact-broker-pb-db.pact-broker.svc.cluster.local"
+    port: "5432"
+    databaseName: "pactbroker"
+    auth:
+      username: "pactbroker"
+      existingSecret: "pact-broker-db"
+      existingSecretPasswordKey: "password"
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    # host: set via environment-specific values
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    tls:
+      enabled: true
+      secretName: "pact-broker-tls"
+
+# PostgreSQL database configuration
+pb-db:
+  enabled: true
+  image:
+    tag: "latest"  # Bitnami now uses unversioned tags for Secure Images
+  auth:
+    username: "pactbroker"
+    database: "pactbroker"
+    existingSecret: "pact-broker-db"
+    secretKeys:
+      adminPasswordKey: "postgres-password"
+      userPasswordKey: "password"
+  primary:
+    service:
+      nameOverride: "pb-db-postgresql"
+    persistence:
+      enabled: true
+      size: 8Gi
+      # storageClass: set via environment-specific values if needed
