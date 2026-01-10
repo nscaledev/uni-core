@@ -19,6 +19,7 @@ package api_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,10 +31,13 @@ import (
 
 const (
 	description = "this is a test"
+
+	authenticateHeader = `Bearer error="invalid_token",error_description="The access token has expired"`
 )
 
 type openapiResponseFixture struct {
 	JSON400 *openapi.Error
+	JSON401 *openapi.Error
 }
 
 // TestExtractError ensures errors are correctly extracted an propagated.
@@ -47,7 +51,7 @@ func TestExtractError(t *testing.T) {
 		},
 	}
 
-	err := api.ExtractError(http.StatusBadRequest, resp)
+	err := api.ExtractError(http.StatusBadRequest, http.Header{}, resp)
 	require.Error(t, err, "must return an error")
 
 	var apiError *errors.Error
@@ -62,7 +66,7 @@ func TestExtractErrorUnknownCode(t *testing.T) {
 
 	resp := &openapiResponseFixture{}
 
-	err := api.ExtractError(http.StatusBadGateway, resp)
+	err := api.ExtractError(http.StatusBadGateway, http.Header{}, resp)
 	require.Error(t, err, "must return an error")
 
 	var apiError *errors.Error
@@ -77,10 +81,43 @@ func TestExtractErrorUnpopulatedCode(t *testing.T) {
 
 	resp := &openapiResponseFixture{}
 
-	err := api.ExtractError(http.StatusBadRequest, resp)
+	err := api.ExtractError(http.StatusBadRequest, http.Header{}, resp)
 	require.Error(t, err, "must return an error")
 
 	var apiError *errors.Error
 
 	require.NotErrorAs(t, err, &apiError, "must not be an API error")
+}
+
+// TestExtractErrorPropagateAuthenticationHeader tests that when an API error
+// has the WWW-Authenticate header set, it is correctly propagated by the error
+// handler to the client.
+func TestExtractErrorPropagateAuthenticationHeader(t *testing.T) {
+	t.Parallel()
+
+	resp := &openapiResponseFixture{
+		JSON401: &openapi.Error{
+			Error:            "invalid_token",
+			ErrorDescription: authenticateHeader,
+		},
+	}
+
+	header := http.Header{}
+	header.Add(errors.AuthenticateHeader, authenticateHeader)
+
+	err := api.ExtractError(http.StatusUnauthorized, header, resp)
+	require.Error(t, err, "must return an error")
+
+	var apiError *errors.Error
+
+	require.ErrorAs(t, err, &apiError, "must be an API error")
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/path", nil)
+
+	apiError.Write(w, r)
+
+	value := w.Header().Get(errors.AuthenticateHeader)
+	require.NotEmpty(t, value, "must have WWW-Authenticate header set")
+	require.Equal(t, authenticateHeader, value, "must pass through the provided header")
 }

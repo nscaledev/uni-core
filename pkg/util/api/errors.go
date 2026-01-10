@@ -20,6 +20,7 @@ package api
 import (
 	goerrors "errors"
 	"fmt"
+	"net/http"
 	"reflect"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
@@ -32,7 +33,7 @@ var (
 
 // ExtractError provides a response type agnostic way of extracting a human readable
 // error from an API.
-func ExtractError(statusCode int, response any) error {
+func ExtractError(statusCode int, header http.Header, response any) error {
 	if statusCode < 400 {
 		return fmt.Errorf("%w: status code %d not valid", ErrExtraction, statusCode)
 	}
@@ -70,5 +71,5 @@ func ExtractError(statusCode int, response any) error {
 		return fmt.Errorf("%w: unable to assert error", ErrExtraction)
 	}
 
-	return errors.FromOpenAPIError(statusCode, concreteError)
+	return errors.FromOpenAPIError(statusCode, header, concreteError)
 }
