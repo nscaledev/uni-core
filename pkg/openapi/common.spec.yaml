@@ -233,6 +233,17 @@ components:
           example:
             error: conflict
             error_description: a resource with the same name already exists
+    unprocessableContentResponse:
+      description: |-
+        The provided request was syntactically correct but the instruction was unable to
+        be processed due to semantic errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error'
+          example:
+            error: unprocessable_content
+            error_description: the request body was in the wrong format
     internalServerErrorResponse:
       description: |-
         An unexpected or unhandled error occurred. This may be a transient error and
