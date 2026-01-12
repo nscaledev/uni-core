@@ -262,3 +262,6 @@ type NotFoundResponse = Error
 
 // UnauthorizedResponse Generic error message, compatible with oauth2.
 type UnauthorizedResponse = Error
+
+// UnprocessableContentResponse Generic error message, compatible with oauth2.
+type UnprocessableContentResponse = Error
