@@ -105,7 +105,7 @@ lint: $(GENDIR)
 # Validate the server OpenAPI schema is legit.
 .PHONY: validate
 validate: $(OPENAPI_FILES)
-	go run ./hack/validate_openapi
+	go run ./hack/validate_openapi -path pkg/openapi/common.spec.yaml
 
 # Perform license checking.
 # This must pass or you will be denied by CI.
