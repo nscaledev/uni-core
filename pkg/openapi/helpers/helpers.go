@@ -16,14 +16,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package openapi
+package helpers
 
 import (
+	goerrors "errors"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
+
+	"github.com/unikorn-cloud/core/pkg/server/errors"
 )
 
 // Schema abstracts schema access and validation.
@@ -64,6 +67,14 @@ func NewSchema(get SchemaGetter) (*Schema, error) {
 func (s *Schema) FindRoute(r *http.Request) (*routers.Route, map[string]string, error) {
 	route, params, err := s.router.FindRoute(r)
 	if err != nil {
+		if goerrors.Is(err, routers.ErrPathNotFound) {
+			return nil, nil, errors.HTTPNotFound()
+		}
+
+		if goerrors.Is(err, routers.ErrMethodNotAllowed) {
+			return nil, nil, errors.HTTPMethodNotAllowed()
+		}
+
 		return nil, nil, err
 	}
 

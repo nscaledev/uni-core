@@ -17,6 +17,7 @@ const (
 	NotFound              ErrorError = "not_found"
 	RequestEntityTooLarge ErrorError = "request_entity_too_large"
 	ServerError           ErrorError = "server_error"
+	TooManyRequests       ErrorError = "too_many_requests"
 	UnprocessableContent  ErrorError = "unprocessable_content"
 	UnsupportedMediaType  ErrorError = "unsupported_media_type"
 )
@@ -259,6 +260,9 @@ type InternalServerErrorResponse = Error
 
 // NotFoundResponse Generic error message, compatible with oauth2.
 type NotFoundResponse = Error
+
+// TooManyRequestsResponse Generic error message, compatible with oauth2.
+type TooManyRequestsResponse = Error
 
 // UnauthorizedResponse Generic error message, compatible with oauth2.
 type UnauthorizedResponse = Error

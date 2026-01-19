@@ -37,6 +37,7 @@ components:
           - request_entity_too_large
           - unprocessable_content
           - forbidden
+          - too_many_requests
         error_description:
           description: Verbose message describing the error.
           type: string
@@ -244,6 +245,17 @@ components:
           example:
             error: unprocessable_content
             error_description: the request body was in the wrong format
+    tooManyRequestsResponse:
+      description: |-
+        Too many requests have been submitted to the API in an amount of time.
+        The client should wait and retry in a short period of time.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error'
+          example:
+            error: too_many_requests
+            error_description: Too many requests have been submitted, retry the request later
     internalServerErrorResponse:
       description: |-
         An unexpected or unhandled error occurred. This may be a transient error and

@@ -180,6 +180,10 @@ func HTTPUnprocessableContent(a ...any) *Error {
 	return newError(http.StatusUnprocessableEntity, openapi.UnprocessableContent, a...)
 }
 
+func TooManyRequests() *Error {
+	return newError(http.StatusTooManyRequests, openapi.TooManyRequests, "Too many requests have been submitted, retry the request later")
+}
+
 // OAuth2InvalidRequest indicates a client error.
 func OAuth2InvalidRequest(a ...any) *Error {
 	return newError(http.StatusBadRequest, openapi.InvalidRequest, a...)
