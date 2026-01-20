@@ -26,7 +26,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/unikorn-cloud/core/pkg/openapi"
+	"github.com/unikorn-cloud/core/pkg/openapi/helpers"
 	"github.com/unikorn-cloud/core/pkg/server/middleware/cors"
 )
 
@@ -39,7 +39,7 @@ const (
 //go:embed cors_test.schema.yaml
 var schema []byte
 
-func getSchema(t *testing.T) *openapi.Schema {
+func getSchema(t *testing.T) *helpers.Schema {
 	t.Helper()
 
 	s, err := openapi3.NewLoader().LoadFromData(schema)
@@ -49,7 +49,7 @@ func getSchema(t *testing.T) *openapi.Schema {
 		return s, nil
 	}
 
-	schema, err := openapi.NewSchema(getter)
+	schema, err := helpers.NewSchema(getter)
 	require.NoError(t, err)
 
 	return schema

@@ -25,7 +25,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/unikorn-cloud/core/pkg/openapi"
+	"github.com/unikorn-cloud/core/pkg/openapi/helpers"
 	"github.com/unikorn-cloud/core/pkg/server/errors"
 	"github.com/unikorn-cloud/core/pkg/util"
 )
@@ -51,7 +51,7 @@ func setAllowOrigin(w http.ResponseWriter, r *http.Request, allowedOrigins []str
 	w.Header().Add("Access-Control-Allow-Origin", allowedOrigins[0])
 }
 
-func Middleware(schema *openapi.Schema, options *Options) func(http.Handler) http.Handler {
+func Middleware(schema *helpers.Schema, options *Options) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// All requests get the allow origin header.  BUT only one!
