@@ -25,8 +25,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/unikorn-cloud/core/pkg/openapi"
 	"github.com/unikorn-cloud/core/pkg/server/errors"
+	"github.com/unikorn-cloud/core/pkg/server/middleware/routeresolver"
 	"github.com/unikorn-cloud/core/pkg/util"
 )
 
@@ -41,13 +41,11 @@ func (o *Options) AddFlags(f *pflag.FlagSet) {
 }
 
 type CORS struct {
-	schema  *openapi.Schema
 	options *Options
 }
 
-func New(schema *openapi.Schema, options *Options) *CORS {
+func New(options *Options) *CORS {
 	return &CORS{
-		schema:  schema,
 		options: options,
 	}
 }
@@ -84,14 +82,16 @@ func (c *CORS) Middleware(next http.Handler) http.Handler {
 		request := r.Clone(r.Context())
 		request.Method = method
 
-		route, _, err := c.schema.FindRoute(request)
+		// The route resolver will have already handled the OPTIONS method
+		// and translated to the correct request method for us.
+		route, err := routeresolver.FromContext(r.Context())
 		if err != nil {
-			errors.HandleError(w, r, errors.HTTPNotFound())
+			errors.HandleError(w, r, err)
 			return
 		}
 
 		// TODO: add OPTIONS to the schema?
-		methods := util.Keys(route.PathItem.Operations())
+		methods := util.Keys(route.Route.PathItem.Operations())
 		methods = append(methods, http.MethodOptions)
 
 		// TODO: I've tried adding them to the schema, but the generator
