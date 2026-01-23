@@ -29,13 +29,21 @@ import (
 // that makes it typed with generics, and also data immutable via deep
 // copies.
 type LRUExpireCache[K comparable, T any] struct {
-	cache *cache.LRUExpireCache
+	cache    *cache.LRUExpireCache
+	zeroCopy bool
 }
 
 func NewLRUExpireCache[K comparable, T any](maxSize int) *LRUExpireCache[K, T] {
 	return &LRUExpireCache[K, T]{
 		cache: cache.NewLRUExpireCache(maxSize),
 	}
+}
+
+// ZeroCopy allows the contents to be modifed, which is probably not
+// what you want, but it is extremely fast, avoiding a deep copy and
+// all the pain reflection inflicts.
+func (c *LRUExpireCache[K, T]) ZeroCopy() {
+	c.zeroCopy = true
 }
 
 func (c *LRUExpireCache[K, T]) Add(key K, value T, ttl time.Duration) {
@@ -58,6 +66,10 @@ func (c *LRUExpireCache[K, T]) Get(key K) (T, bool) {
 	typedValue, ok := value.(T)
 	if !ok {
 		return zero, false
+	}
+
+	if c.zeroCopy {
+		return typedValue, true
 	}
 
 	t, err := deep.Copy(typedValue)
