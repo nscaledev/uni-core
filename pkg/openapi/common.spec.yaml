@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Common API types.
-  version: 1.12.0
+  version: 1.13.0
 paths: {}
 components:
   parameters:
@@ -233,6 +233,17 @@ components:
           example:
             error: conflict
             error_description: a resource with the same name already exists
+    unprocessableContentResponse:
+      description: |-
+        The provided request was syntactically correct but the instruction was unable to
+        be processed due to semantic errors.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/error'
+          example:
+            error: unprocessable_content
+            error_description: the request body was in the wrong format
     internalServerErrorResponse:
       description: |-
         An unexpected or unhandled error occurred. This may be a transient error and
