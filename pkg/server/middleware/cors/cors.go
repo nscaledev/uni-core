@@ -40,63 +40,73 @@ func (o *Options) AddFlags(f *pflag.FlagSet) {
 	f.IntVar(&o.MaxAge, "cors-max-age", 86400, "CORS maximum age (may be overridden by the browser)")
 }
 
-func setAllowOrigin(w http.ResponseWriter, r *http.Request, allowedOrigins []string) {
+type CORS struct {
+	schema  *openapi.Schema
+	options *Options
+}
+
+func New(schema *openapi.Schema, options *Options) *CORS {
+	return &CORS{
+		schema:  schema,
+		options: options,
+	}
+}
+
+func (c *CORS) setAllowOrigin(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" {
-		if index := slices.IndexFunc(allowedOrigins, func(s string) bool { return s == origin }); index >= 0 {
+		if index := slices.IndexFunc(c.options.AllowedOrigins, func(s string) bool { return s == origin }); index >= 0 {
 			w.Header().Add("Access-Control-Allow-Origin", origin)
 			return
 		}
 	}
 
-	w.Header().Add("Access-Control-Allow-Origin", allowedOrigins[0])
+	w.Header().Add("Access-Control-Allow-Origin", c.options.AllowedOrigins[0])
 }
 
-func Middleware(schema *openapi.Schema, options *Options) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// All requests get the allow origin header.  BUT only one!
-			setAllowOrigin(w, r, options.AllowedOrigins)
+func (c *CORS) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// All requests get the allow origin header.  BUT only one!
+		c.setAllowOrigin(w, r)
 
-			// For normal requests handle them.
-			if r.Method != http.MethodOptions {
-				next.ServeHTTP(w, r)
-				return
-			}
+		// For normal requests handle them.
+		if r.Method != http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
 
-			// Handle preflight
-			method := r.Header.Get("Access-Control-Request-Method")
-			if method == "" {
-				errors.HandleError(w, r, errors.OAuth2InvalidRequest("OPTIONS missing Access-Control-Request-Method header"))
-				return
-			}
+		// Handle preflight
+		method := r.Header.Get("Access-Control-Request-Method")
+		if method == "" {
+			errors.HandleError(w, r, errors.OAuth2InvalidRequest("OPTIONS missing Access-Control-Request-Method header"))
+			return
+		}
 
-			request := r.Clone(r.Context())
-			request.Method = method
+		request := r.Clone(r.Context())
+		request.Method = method
 
-			route, _, err := schema.FindRoute(request)
-			if err != nil {
-				errors.HandleError(w, r, errors.HTTPNotFound())
-				return
-			}
+		route, _, err := c.schema.FindRoute(request)
+		if err != nil {
+			errors.HandleError(w, r, errors.HTTPNotFound())
+			return
+		}
 
-			// TODO: add OPTIONS to the schema?
-			methods := util.Keys(route.PathItem.Operations())
-			methods = append(methods, http.MethodOptions)
+		// TODO: add OPTIONS to the schema?
+		methods := util.Keys(route.PathItem.Operations())
+		methods = append(methods, http.MethodOptions)
 
-			// TODO: I've tried adding them to the schema, but the generator
-			// adds them to the hander function signatures, which is superfluous
-			// to requirements.
-			headers := []string{
-				"Authorization",
-				"Content-Type",
-				"traceparent",
-				"tracestate",
-			}
+		// TODO: I've tried adding them to the schema, but the generator
+		// adds them to the hander function signatures, which is superfluous
+		// to requirements.
+		headers := []string{
+			"Authorization",
+			"Content-Type",
+			"traceparent",
+			"tracestate",
+		}
 
-			w.Header().Add("Access-Control-Allow-Methods", strings.Join(methods, ", "))
-			w.Header().Add("Access-Control-Allow-Headers", strings.Join(headers, ", "))
-			w.Header().Add("Access-Control-Max-Age", strconv.Itoa(options.MaxAge))
-			w.WriteHeader(http.StatusNoContent)
-		})
-	}
+		w.Header().Add("Access-Control-Allow-Methods", strings.Join(methods, ", "))
+		w.Header().Add("Access-Control-Allow-Headers", strings.Join(headers, ", "))
+		w.Header().Add("Access-Control-Max-Age", strconv.Itoa(c.options.MaxAge))
+		w.WriteHeader(http.StatusNoContent)
+	})
 }

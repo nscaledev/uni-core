@@ -98,9 +98,9 @@ func defaultExpectedHeadersWithOrigin(t *testing.T, origin string) http.Header {
 func TestCORS(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t))
+	middleware := cors.New(getSchema(t), getOptions(t))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 
@@ -118,9 +118,9 @@ func TestCORSExplicitOriginHit(t *testing.T) {
 	origin2 := "bar.acme.com"
 	origin3 := "baz.acme.com"
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t, origin1, origin2, origin3))
+	middleware := cors.New(getSchema(t), getOptions(t, origin1, origin2, origin3))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 
@@ -138,9 +138,9 @@ func TestCORSExplicitOriginMiss(t *testing.T) {
 	origin2 := "bar.acme.com"
 	origin3 := "baz.acme.com"
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t, origin1, origin2, origin3))
+	middleware := cors.New(getSchema(t), getOptions(t, origin1, origin2, origin3))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 
@@ -154,9 +154,9 @@ func TestCORSExplicitOriginMiss(t *testing.T) {
 func TestCORSNotFound(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t))
+	middleware := cors.New(getSchema(t), getOptions(t))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, badPath, nil)
@@ -171,9 +171,9 @@ func TestCORSNotFound(t *testing.T) {
 func TestCORSBadRequestMethod(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t))
+	middleware := cors.New(getSchema(t), getOptions(t))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, badPath, nil)
@@ -187,9 +187,9 @@ func TestCORSBadRequestMethod(t *testing.T) {
 func TestCORSPassthrough(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.Middleware(getSchema(t), getOptions(t))
+	middleware := cors.New(getSchema(t), getOptions(t))
 
-	handler := middleware(http.HandlerFunc(fakeHandler))
+	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, badPath, nil)
