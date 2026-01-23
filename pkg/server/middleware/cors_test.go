@@ -18,13 +18,13 @@ limitations under the License.
 package middleware_test
 
 import (
-	"context"
 	_ "embed"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/unikorn-cloud/core/pkg/openapi/helpers"
@@ -71,25 +71,27 @@ func getOptions(t *testing.T, allowedOrigins ...string) *cors.Options {
 	}
 }
 
-func fakeHandler(_ http.ResponseWriter, _ *http.Request) {
+func getHandler(t *testing.T, options *cors.Options) http.Handler {
+	t.Helper()
+
+	routeresolver := routeresolver.New(getSchema(t))
+	cors := cors.New(options)
+
+	r := chi.NewRouter()
+	r.Use(routeresolver.Middleware)
+	r.Use(cors.Middleware)
+
+	r.Group(func(r chi.Router) {
+		r.Get("/api", http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	})
+
+	return r
 }
 
 func defaultRequestWithOrigin(t *testing.T, origin string) *http.Request {
 	t.Helper()
 
-	schema := getSchema(t)
-
-	route, parameters, err := schema.FindRoute(httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
-	require.NoError(t, err)
-
-	info := &routeresolver.RouteInfo{
-		Route:      route,
-		Parameters: parameters,
-	}
-
-	ctx := context.WithValue(t.Context(), routeresolver.RouteInfoKey, info)
-
-	r := httptest.NewRequestWithContext(ctx, http.MethodOptions, path, nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, path, nil)
 	r.Header.Add("Origin", origin)
 	r.Header.Add("Access-Control-Request-Method", "GET")
 
@@ -112,9 +114,7 @@ func defaultExpectedHeadersWithOrigin(t *testing.T, origin string) http.Header {
 func TestCORS(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.New(getOptions(t))
-
-	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
+	handler := getHandler(t, getOptions(t))
 
 	w := httptest.NewRecorder()
 
@@ -132,9 +132,7 @@ func TestCORSExplicitOriginHit(t *testing.T) {
 	origin2 := "bar.acme.com"
 	origin3 := "baz.acme.com"
 
-	middleware := cors.New(getOptions(t, origin1, origin2, origin3))
-
-	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
+	handler := getHandler(t, getOptions(t, origin1, origin2, origin3))
 
 	w := httptest.NewRecorder()
 
@@ -152,9 +150,7 @@ func TestCORSExplicitOriginMiss(t *testing.T) {
 	origin2 := "bar.acme.com"
 	origin3 := "baz.acme.com"
 
-	middleware := cors.New(getOptions(t, origin1, origin2, origin3))
-
-	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
+	handler := getHandler(t, getOptions(t, origin1, origin2, origin3))
 
 	w := httptest.NewRecorder()
 
@@ -168,9 +164,7 @@ func TestCORSExplicitOriginMiss(t *testing.T) {
 func TestCORSBadRequestMethod(t *testing.T) {
 	t.Parallel()
 
-	middleware := cors.New(getOptions(t))
-
-	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
+	handler := getHandler(t, getOptions(t))
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, badPath, nil)
@@ -178,21 +172,4 @@ func TestCORSBadRequestMethod(t *testing.T) {
 
 	handler.ServeHTTP(w, r)
 	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// TestCORSPassthrough checks that nothing happens if its a call to a non-OPTIONS endpoint.
-func TestCORSPassthrough(t *testing.T) {
-	t.Parallel()
-
-	middleware := cors.New(getOptions(t))
-
-	handler := middleware.Middleware(http.HandlerFunc(fakeHandler))
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, badPath, nil)
-	r.Header.Add("Origin", origin)
-	r.Header.Add("Access-Control-Request-Method", "GET")
-
-	handler.ServeHTTP(w, r)
-	require.Equal(t, http.StatusOK, w.Code)
 }

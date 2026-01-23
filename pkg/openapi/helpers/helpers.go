@@ -19,24 +19,19 @@ limitations under the License.
 package helpers
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
-	"github.com/getkin/kin-openapi/routers/gorillamux"
+	chi "github.com/go-chi/chi/v5"
 
-	servererrors "github.com/unikorn-cloud/core/pkg/server/errors"
+	"github.com/unikorn-cloud/core/pkg/server/errors"
 )
 
 // Schema abstracts schema access and validation.
 type Schema struct {
 	// spec is the full specification.
 	spec *openapi3.T
-
-	// router is a router able to process requests and return the
-	// route from the spec.
-	router routers.Router
 }
 
 // SchemaGetter allows clients to get their schema from wherever.
@@ -50,14 +45,8 @@ func NewSchema(get SchemaGetter) (*Schema, error) {
 		return nil, err
 	}
 
-	router, err := gorillamux.NewRouter(spec)
-	if err != nil {
-		return nil, err
-	}
-
 	s := &Schema{
-		spec:   spec,
-		router: router,
+		spec: spec,
 	}
 
 	return s, nil
@@ -65,18 +54,36 @@ func NewSchema(get SchemaGetter) (*Schema, error) {
 
 // FindRoute looks up the route from the specification.
 func (s *Schema) FindRoute(r *http.Request) (*routers.Route, map[string]string, error) {
-	route, params, err := s.router.FindRoute(r)
-	if err != nil {
-		if errors.Is(err, routers.ErrPathNotFound) {
-			return nil, nil, servererrors.HTTPNotFound().WithValues("path", r.URL.String())
-		}
+	rctx := chi.RouteContext(r.Context())
 
-		if errors.Is(err, routers.ErrMethodNotAllowed) {
-			return nil, nil, servererrors.HTTPMethodNotAllowed().WithValues("path", r.URL.String(), "method", r.Method)
-		}
-
-		return nil, nil, err
+	routePath := rctx.Routes.Find(rctx, r.Method, r.URL.Path)
+	if routePath == "" {
+		return nil, nil, errors.HTTPNotFound().WithValues("path", r.URL.String())
 	}
 
-	return route, params, nil
+	path := s.spec.Paths.Find(routePath)
+	if path == nil {
+		return nil, nil, errors.HTTPNotFound().WithValues("path", r.URL.String())
+	}
+
+	operation := path.GetOperation(r.Method)
+	if operation == nil {
+		return nil, nil, errors.HTTPMethodNotAllowed().WithValues("path", r.URL.String(), "method", r.Method)
+	}
+
+	route := &routers.Route{
+		Spec:      s.spec,
+		Path:      routePath,
+		PathItem:  path,
+		Method:    r.Method,
+		Operation: operation,
+	}
+
+	parameters := map[string]string{}
+
+	for i := range rctx.URLParams.Keys {
+		parameters[rctx.URLParams.Keys[i]] = rctx.URLParams.Values[i]
+	}
+
+	return route, parameters, nil
 }
