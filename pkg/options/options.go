@@ -67,35 +67,6 @@ func (o *CoreOptions) SetupLogging() {
 	otel.SetLogger(logr)
 }
 
-// alwaysRecordSampler is not provided by the otel libraries, but the problem
-// we are solving here is we need to see all errors in a production setting, but
-// to improve performance we use sampling to reduce processing and transmitting
-// spans, and that means that a dropped span will never be logged.  This tells
-// otel to collect the information, but not process it.
-type alwaysRecordSampler struct {
-	parent trace.Sampler
-}
-
-func alwaysRecord(parent trace.Sampler) trace.Sampler {
-	return &alwaysRecordSampler{
-		parent: parent,
-	}
-}
-
-func (s *alwaysRecordSampler) ShouldSample(p trace.SamplingParameters) trace.SamplingResult {
-	result := s.parent.ShouldSample(p)
-
-	if result.Decision == trace.Drop {
-		result.Decision = trace.RecordOnly
-	}
-
-	return result
-}
-
-func (s *alwaysRecordSampler) Description() string {
-	return "AlwasyRecord{" + s.parent.Description() + "}"
-}
-
 func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.TracerProviderOption) error {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
@@ -110,11 +81,11 @@ func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.Trac
 
 	switch {
 	case o.TraceSampingRatio <= 0.0:
-		opts = append(opts, trace.WithSampler(alwaysRecord(trace.NeverSample())))
+		opts = append(opts, trace.WithSampler(trace.NeverSample()))
 	case o.TraceSampingRatio >= 1.0:
 		opts = append(opts, trace.WithSampler(trace.AlwaysSample()))
 	default:
-		opts = append(opts, trace.WithSampler(alwaysRecord(trace.ParentBased(trace.TraceIDRatioBased(o.TraceSampingRatio)))))
+		opts = append(opts, trace.WithSampler(trace.ParentBased(trace.TraceIDRatioBased(o.TraceSampingRatio))))
 	}
 
 	otel.SetTracerProvider(trace.NewTracerProvider(opts...))
