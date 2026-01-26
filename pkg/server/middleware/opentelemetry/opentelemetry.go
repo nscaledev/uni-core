@@ -65,11 +65,19 @@ type LoggingSpanProcessor struct{}
 var _ sdktrace.SpanProcessor = &LoggingSpanProcessor{}
 
 func (*LoggingSpanProcessor) OnStart(ctx context.Context, s sdktrace.ReadWriteSpan) {
-	log.Log.Info("span start", logValuesFromSpan(s)...)
+	// Logging is not free, and is disabled by default, enable with
+	// --zap-log-level=debug.
+	if log.Log.V(1).Enabled() {
+		log.Log.Info("span start", logValuesFromSpan(s)...)
+	}
 }
 
 func (*LoggingSpanProcessor) OnEnd(s sdktrace.ReadOnlySpan) {
-	log.Log.Info("span end", logValuesFromSpan(s)...)
+	// Logging is not free, and is disabled by default, enable with
+	// --zap-log-level=debug.
+	if log.Log.V(1).Enabled() || s.Status().Code == codes.Error {
+		log.Log.Info("span end", logValuesFromSpan(s)...)
+	}
 }
 
 func (*LoggingSpanProcessor) Shutdown(ctx context.Context) error {
@@ -221,39 +229,49 @@ func httpStatusToOtelCode(status int) (codes.Code, string) {
 	return code, http.StatusText(status)
 }
 
-// Middleware attaches logging context to the request.
-func Middleware(serviceName, version string) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Extract the tracing information from the HTTP headers.
-			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+type OpenTelemetry struct {
+	serviceName string
+	version     string
+}
 
-			// Add in service information.
-			var attr []attribute.KeyValue
-
-			attr = append(attr, semconv.ServiceName(serviceName))
-			attr = append(attr, semconv.ServiceVersion(version))
-			attr = append(attr, httpRequestAttributes(r)...)
-
-			tracer := otel.GetTracerProvider().Tracer("opentelemetry middleware")
-
-			// Begin the span processing.
-			name := r.URL.Path
-
-			ctx, span := tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attr...))
-			defer span.End()
-
-			// Setup logging.
-			ctx = log.IntoContext(ctx, log.Log.WithValues(logValuesFromSpanContext(name, span.SpanContext())...))
-
-			// Create a new request with any contextual information the tracer has added.
-			request := r.WithContext(ctx)
-
-			metrics := httpsnoop.CaptureMetrics(next, w, request)
-
-			// Extract HTTP response information for logging purposes.
-			span.SetAttributes(httpResponseAttributes(metrics, w)...)
-			span.SetStatus(httpStatusToOtelCode(metrics.Code))
-		})
+func New(serviceName, version string) *OpenTelemetry {
+	return &OpenTelemetry{
+		serviceName: serviceName,
+		version:     version,
 	}
+}
+
+// Middleware attaches logging context to the request.
+func (o *OpenTelemetry) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Extract the tracing information from the HTTP headers.
+		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+
+		// Add in service information.
+		var attr []attribute.KeyValue
+
+		attr = append(attr, semconv.ServiceName(o.serviceName))
+		attr = append(attr, semconv.ServiceVersion(o.version))
+		attr = append(attr, httpRequestAttributes(r)...)
+
+		tracer := otel.GetTracerProvider().Tracer("opentelemetry middleware")
+
+		// Begin the span processing.
+		name := r.URL.Path
+
+		ctx, span := tracer.Start(ctx, name, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attr...))
+		defer span.End()
+
+		// Setup logging.
+		ctx = log.IntoContext(ctx, log.Log.WithValues(logValuesFromSpanContext(name, span.SpanContext())...))
+
+		// Create a new request with any contextual information the tracer has added.
+		request := r.WithContext(ctx)
+
+		metrics := httpsnoop.CaptureMetrics(next, w, request)
+
+		// Extract HTTP response information for logging purposes.
+		span.SetAttributes(httpResponseAttributes(metrics, w)...)
+		span.SetStatus(httpStatusToOtelCode(metrics.Code))
+	})
 }
