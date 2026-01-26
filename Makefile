@@ -67,6 +67,85 @@ test-unit:
 	go test -coverpkg ./... -coverprofile cover.out ./...
 	go tool cover -html cover.out -o cover.html
 
+# Start local Pact Broker
+.PHONY: pact-broker-start
+pact-broker-start:
+	docker-compose -f docker-compose.pact-broker.yml up -d
+
+# Stop local Pact Broker
+.PHONY: pact-broker-stop
+pact-broker-stop:
+	docker-compose -f docker-compose.pact-broker.yml down
+
+# View Pact Broker logs
+.PHONY: pact-broker-logs
+pact-broker-logs:
+	docker-compose -f docker-compose.pact-broker.yml logs -f
+
+# Stop Pact Broker and remove all data
+.PHONY: pact-broker-clean
+pact-broker-clean:
+	docker-compose -f docker-compose.pact-broker.yml down -v
+
+# Update Helm dependencies for Pact Broker chart
+.PHONY: pact-broker-deps
+pact-broker-deps:
+	helm dependency update charts/pact-broker
+
+# Deploy Pact Broker to Kubernetes cluster (dev environment)
+.PHONY: pact-broker-deploy-dev
+pact-broker-deploy-dev: pact-broker-deps
+	helm upgrade --install pact-broker charts/pact-broker \
+		--namespace pact-broker --create-namespace \
+		--values charts/pact-broker/values.yaml \
+		--values charts/pact-broker/values-dev.yaml
+
+# Deploy Pact Broker to Kubernetes cluster (UAT environment)
+.PHONY: pact-broker-deploy-uat
+pact-broker-deploy-uat: pact-broker-deps
+	helm upgrade --install pact-broker charts/pact-broker \
+		--namespace pact-broker --create-namespace \
+		--values charts/pact-broker/values.yaml \
+		--values charts/pact-broker/values-uat.yaml
+
+# Upgrade Pact Broker deployment (dev)
+.PHONY: pact-broker-upgrade-dev
+pact-broker-upgrade-dev: pact-broker-deps
+	helm upgrade pact-broker charts/pact-broker \
+		--namespace pact-broker \
+		--values charts/pact-broker/values.yaml \
+		--values charts/pact-broker/values-dev.yaml
+
+# Upgrade Pact Broker deployment (UAT)
+.PHONY: pact-broker-upgrade-uat
+pact-broker-upgrade-uat: pact-broker-deps
+	helm upgrade pact-broker charts/pact-broker \
+		--namespace pact-broker \
+		--values charts/pact-broker/values.yaml \
+		--values charts/pact-broker/values-uat.yaml
+
+# Check Pact Broker deployment status
+.PHONY: pact-broker-status
+pact-broker-status:
+	@echo "=== Helm Release Status ==="
+	@helm status pact-broker -n pact-broker
+	@echo ""
+	@echo "=== Pod Status ==="
+	@kubectl get pods -n pact-broker
+	@echo ""
+	@echo "=== Ingress Status ==="
+	@kubectl get ingress -n pact-broker
+
+# View Pact Broker Kubernetes logs
+.PHONY: pact-broker-logs-k8s
+pact-broker-logs-k8s:
+	kubectl logs -n pact -l app.kubernetes.io/name=pact-broker -f
+
+# Uninstall Pact Broker from Kubernetes
+.PHONY: pact-broker-uninstall
+pact-broker-uninstall:
+	helm uninstall pact-broker -n pact
+
 pkg/openapi/types.go: pkg/openapi/common.spec.yaml
 	@go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OPENAPI_CODEGEN_VERSION)
 	oapi-codegen -generate types,skip-prune -package openapi -o $@ $<
@@ -101,6 +180,8 @@ lint: $(GENDIR)
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(LINT_VERSION)
 	$(GOBIN)/golangci-lint run ./...
 	helm lint --strict charts/core
+	helm dependency build charts/pact-broker
+	helm lint --strict charts/pact-broker
 
 # Validate the server OpenAPI schema is legit.
 .PHONY: validate
