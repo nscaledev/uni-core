@@ -1,0 +1,16 @@
+Pact Broker has been deployed successfully!
+
+To access the Pact Broker:
+
+{{- if index .Values "pact-broker" "ingress" "enabled" }}
+{{- if index .Values "pact-broker" "ingress" "host" }}
+  External URL: https://{{ index .Values "pact-broker" "ingress" "host" }}
+{{- else }}
+  External URL: Ingress enabled but host not configured
+{{- end }}
+{{- else }}
+  Internal URL: http://{{ .Release.Name }}-pact-broker
+{{- end }}
+
+For more information about using Pact Broker, visit:
+  https://docs.pact.io/
