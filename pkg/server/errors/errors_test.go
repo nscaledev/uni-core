@@ -18,10 +18,7 @@ limitations under the License.
 package errors_test
 
 import (
-	"encoding/json"
-	goerrors "errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,166 +28,56 @@ import (
 )
 
 const (
-	messageFixture = "Hello World!"
+	description = "this is a test"
 )
 
-var (
-	errFixture = goerrors.New("fail")
-)
-
-// validate ensures codes, headers and the body is correctly populated.
-func validate(t *testing.T, w *httptest.ResponseRecorder, code int, header http.Header, errorString openapi.ErrorError, description string) {
-	t.Helper()
-
-	require.Equal(t, code, w.Code)
-	require.Equal(t, header, w.Header())
-
-	var body openapi.Error
-
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Equal(t, errorString, body.Error)
-	require.NotEmpty(t, body.ErrorDescription)
-
-	if description != "" {
-		require.Equal(t, description, body.ErrorDescription)
-	}
+type openapiResponseFixture struct {
+	JSON400 *openapi.Error
 }
 
-func request(t *testing.T) *http.Request {
-	t.Helper()
-
-	return httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://acme.corp", nil)
-}
-
-func defaultheader() http.Header {
-	h := http.Header{}
-	h.Add("Content-Type", "application/json")
-	h.Add("Cache-Control", "no-cache")
-
-	return h
-}
-
-// TestDefault tests a default error is handled as a 500.
-func TestDefault(t *testing.T) {
+// TestPropagateError ensures errors are correctly extracted an propagated.
+func TestPropagateError(t *testing.T) {
 	t.Parallel()
 
-	w := httptest.NewRecorder()
+	resp := &openapiResponseFixture{
+		JSON400: &openapi.Error{
+			Error:            openapi.InvalidRequest,
+			ErrorDescription: description,
+		},
+	}
 
-	errors.HandleError(w, request(t), errFixture)
+	err := errors.PropagateError(http.StatusBadRequest, resp)
+	require.Error(t, err, "must return an error")
 
-	validate(t, w, http.StatusInternalServerError, defaultheader(), openapi.ServerError, "")
+	require.True(t, errors.IsBadRequest(err))
 }
 
-// TestNoContext tests handlers that provide no further context.
-func TestNoContext(t *testing.T) {
+// TestPropagateErrorUnknownCode ensures we can handle something that is unexpected
+// e.g. an ingress going wrong.
+func TestPropagateErrorUnknownCode(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		f           func() *errors.Error
-		code        int
-		header      http.Header
-		errorString openapi.ErrorError
-	}{
-		{
-			name:        "NotFound",
-			f:           errors.HTTPNotFound,
-			code:        http.StatusNotFound,
-			errorString: openapi.NotFound,
-		},
-		{
-			name:        "MethodNotAllowed",
-			f:           errors.HTTPMethodNotAllowed,
-			code:        http.StatusMethodNotAllowed,
-			errorString: openapi.MethodNotAllowed,
-		},
-		{
-			name:        "Conflict",
-			f:           errors.HTTPConflict,
-			code:        http.StatusConflict,
-			errorString: openapi.Conflict,
-		},
-	}
+	resp := &openapiResponseFixture{}
 
-	for i := range tests {
-		test := &tests[i]
+	err := errors.PropagateError(http.StatusBadGateway, resp)
+	require.Error(t, err, "must return an error")
 
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	var errorsError *errors.Error
 
-			w := httptest.NewRecorder()
-
-			errors.HandleError(w, request(t), test.f())
-
-			header := test.header
-			if header == nil {
-				header = defaultheader()
-			}
-
-			validate(t, w, test.code, header, test.errorString, "")
-		})
-	}
+	require.NotErrorAs(t, err, &errorsError, "must not be an API error")
 }
 
-// TestWithContext tests handlers that provide something useful to the end user.
-func TestWithContext(t *testing.T) {
+// TestPropagateErrorUnpopulatedCode ensures we can handle something that should be
+// populated but isn't e.g. faulty API error handling.
+func TestPropagateErrorUnpopulatedCode(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		f           func(a ...any) *errors.Error
-		code        int
-		header      http.Header
-		errorString openapi.ErrorError
-	}{
-		{
-			name:        "Forbidden",
-			f:           errors.HTTPForbidden,
-			code:        http.StatusForbidden,
-			errorString: openapi.Forbidden,
-		},
-		{
-			name:        "RequestEntityTooLarge",
-			f:           errors.HTTPRequestEntityTooLarge,
-			code:        http.StatusRequestEntityTooLarge,
-			errorString: openapi.RequestEntityTooLarge,
-		},
-		{
-			name:        "InvalidRequest",
-			f:           errors.OAuth2InvalidRequest,
-			code:        http.StatusBadRequest,
-			errorString: openapi.InvalidRequest,
-		},
-		{
-			name:        "UnprocessableContent",
-			f:           errors.HTTPUnprocessableContent,
-			code:        http.StatusUnprocessableEntity,
-			errorString: openapi.UnprocessableContent,
-		},
-		{
-			name:        "AccessDenied",
-			f:           errors.OAuth2AccessDenied,
-			code:        http.StatusUnauthorized,
-			errorString: openapi.AccessDenied,
-		},
-	}
+	resp := &openapiResponseFixture{}
 
-	for i := range tests {
-		test := &tests[i]
+	err := errors.PropagateError(http.StatusBadRequest, resp)
+	require.Error(t, err, "must return an error")
 
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	var errorsError *errors.Error
 
-			w := httptest.NewRecorder()
-
-			errors.HandleError(w, request(t), test.f(messageFixture))
-
-			header := test.header
-			if header == nil {
-				header = defaultheader()
-			}
-
-			validate(t, w, test.code, header, test.errorString, messageFixture)
-		})
-	}
+	require.NotErrorAs(t, err, &errorsError, "must not be an API error")
 }

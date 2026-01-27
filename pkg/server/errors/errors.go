@@ -23,7 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 
+	coreerrors "github.com/unikorn-cloud/core/pkg/errors"
 	"github.com/unikorn-cloud/core/pkg/openapi"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -132,6 +134,33 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// asError is a handy unwrapper to get a HTTP error from a generic one.
+func asError(err error) *Error {
+	var httpErr *Error
+
+	if !errors.As(err, &httpErr) {
+		return nil
+	}
+
+	return httpErr
+}
+
+// isErrorType allows an error to be tested as an internal error type
+// and also to check the HTTP error code associated with it, primarily to
+// ease testing.
+func isErrorType(err error, code int) bool {
+	httpError := asError(err)
+	if httpError == nil {
+		return false
+	}
+
+	if httpError.status != code {
+		return false
+	}
+
+	return true
+}
+
 // FromOpenAPIError allows propagation across API calls.
 func FromOpenAPIError(code int, err *openapi.Error) *Error {
 	return newError(code, err.Error, err.ErrorDescription)
@@ -142,24 +171,19 @@ func HTTPForbidden(a ...any) *Error {
 	return newError(http.StatusForbidden, openapi.Forbidden, a...)
 }
 
+// IsForbidden checks if the error is as described.
+func IsForbidden(err error) bool {
+	return isErrorType(err, http.StatusForbidden)
+}
+
 // HTTPNotFound is raised when the requested resource doesn't exist.
 func HTTPNotFound() *Error {
 	return newError(http.StatusNotFound, openapi.NotFound, "resource not found")
 }
 
-// IsHTTPNotFound interrogates the error type.
+// IsHTTPNotFound checks if the error is as described.
 func IsHTTPNotFound(err error) bool {
-	httpError := &Error{}
-
-	if ok := errors.As(err, &httpError); !ok {
-		return false
-	}
-
-	if httpError.status != http.StatusNotFound {
-		return false
-	}
-
-	return true
+	return isErrorType(err, http.StatusNotFound)
 }
 
 // HTTPMethodNotAllowed is raised when the method is not supported.
@@ -167,17 +191,41 @@ func HTTPMethodNotAllowed() *Error {
 	return newError(http.StatusMethodNotAllowed, openapi.MethodNotAllowed, "the requested method was not allowed")
 }
 
+// IsMethodNotAllowed checks if the error is as described.
+func IsMethodNotAllowed(err error) bool {
+	return isErrorType(err, http.StatusMethodNotAllowed)
+}
+
 // HTTPConflict is raised when a request conflicts with another resource.
 func HTTPConflict() *Error {
 	return newError(http.StatusConflict, openapi.Conflict, "the requested resource already exists")
 }
 
+// IsConflict checks if the error is as described.
+func IsConflict(err error) bool {
+	return isErrorType(err, http.StatusConflict)
+}
+
+// HTTPRequestEntityTooLarge is raised when the request body is too large and
+// overlows internal size limits.
 func HTTPRequestEntityTooLarge(a ...any) *Error {
 	return newError(http.StatusRequestEntityTooLarge, openapi.RequestEntityTooLarge, a...)
 }
 
+// IsRequestEntityTooLarge checks if the error is as described.
+func IsRequestEntityTooLarge(err error) bool {
+	return isErrorType(err, http.StatusRequestEntityTooLarge)
+}
+
+// HTTPUnprocessableContent is used when everything is syntactically correct but
+// semantically makes no sense.
 func HTTPUnprocessableContent(a ...any) *Error {
 	return newError(http.StatusUnprocessableEntity, openapi.UnprocessableContent, a...)
+}
+
+// IsUnprocessableContent checks if the error is as described.
+func IsUnprocessableContent(err error) bool {
+	return isErrorType(err, http.StatusUnprocessableEntity)
 }
 
 // OAuth2InvalidRequest indicates a client error.
@@ -185,10 +233,20 @@ func OAuth2InvalidRequest(a ...any) *Error {
 	return newError(http.StatusBadRequest, openapi.InvalidRequest, a...)
 }
 
+// IsBadRequest checks if the error is as described.
+func IsBadRequest(err error) bool {
+	return isErrorType(err, http.StatusBadRequest)
+}
+
 // OAuth2AccessDenied tells the client the authentication failed e.g.
 // username/password are wrong, or a token has expired and needs reauthentication.
 func OAuth2AccessDenied(a ...any) *Error {
 	return newError(http.StatusUnauthorized, openapi.AccessDenied, a...)
+}
+
+// IsAccessDenied checks if the error is as described.
+func IsAccessDenied(err error) bool {
+	return isErrorType(err, http.StatusUnauthorized)
 }
 
 // OAuth2ServerError tells the client we are at fault, this should never be seen
@@ -198,21 +256,53 @@ func OAuth2ServerError(a ...any) *Error {
 	return newError(http.StatusInternalServerError, openapi.ServerError, a...)
 }
 
-// toError is a handy unwrapper to get a HTTP error from a generic one.
-func toError(err error) *Error {
-	var httpErr *Error
-
-	if !errors.As(err, &httpErr) {
-		return nil
+// PropagateError provides a response type agnostic way of extracting a human readable
+// error from an API.
+func PropagateError(statusCode int, response any) error {
+	if statusCode < 400 {
+		return fmt.Errorf("%w: status code %d not valid", coreerrors.ErrAPIStatus, statusCode)
 	}
 
-	return httpErr
+	// We expect the response to be a pointer to a struct...
+	v := reflect.ValueOf(response)
+
+	if v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return fmt.Errorf("%w: error response is not a struct", coreerrors.ErrTypeConversion)
+	}
+
+	// ... that through the magic of autogeneration has a field for the status code ...
+	fieldName := fmt.Sprintf("JSON%d", statusCode)
+
+	f := v.FieldByName(fieldName)
+	if !f.IsValid() {
+		return fmt.Errorf("%w: error field %s not defined", coreerrors.ErrTypeConversion, fieldName)
+	}
+
+	if f.IsZero() {
+		return fmt.Errorf("%w: error field %s not populated", coreerrors.ErrTypeConversion, fieldName)
+	}
+
+	if !f.CanInterface() {
+		return fmt.Errorf("%w: error field %s not interfaceable", coreerrors.ErrTypeConversion, fieldName)
+	}
+
+	// ... which points to an Error.
+	concreteError, ok := f.Interface().(*openapi.Error)
+	if !ok {
+		return fmt.Errorf("%w: unable to assert error", coreerrors.ErrTypeConversion)
+	}
+
+	return newError(statusCode, concreteError.Error, concreteError.ErrorDescription)
 }
 
 // HandleError is the top level error handler that should be called from all
 // path handlers on error.
 func HandleError(w http.ResponseWriter, r *http.Request, err error) {
-	if httpError := toError(err); httpError != nil {
+	if httpError := asError(err); httpError != nil {
 		httpError.Write(w, r)
 
 		return
