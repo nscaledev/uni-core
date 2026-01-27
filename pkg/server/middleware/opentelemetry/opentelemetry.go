@@ -19,7 +19,6 @@ limitations under the License.
 package opentelemetry
 
 import (
-	"context"
 	"net/http"
 	"slices"
 	"strconv"
@@ -30,7 +29,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.22.0"
 	"go.opentelemetry.io/otel/trace"
 
@@ -38,54 +36,14 @@ import (
 )
 
 // logValuesFromSpan gets a generic set of key/value pairs from a span for logging.
+// NOTE: please don't use periods or other characters in field names that will make
+// the use of json path queries difficult.
 func logValuesFromSpanContext(name string, s trace.SpanContext) []any {
 	return []any{
-		"span.name", name,
-		"span.id", s.SpanID().String(),
-		"trace.id", s.TraceID().String(),
+		"spanName", name,
+		"spanID", s.SpanID().String(),
+		"traceID", s.TraceID().String(),
 	}
-}
-
-// logValuesFromSpan gets a generic set of key/value pairs from a span for logging.
-func logValuesFromSpan(s sdktrace.ReadOnlySpan) []any {
-	values := logValuesFromSpanContext(s.Name(), s.SpanContext())
-
-	for _, attribute := range s.Attributes() {
-		values = append(values, string(attribute.Key), attribute.Value.Emit())
-	}
-
-	return values
-}
-
-// LoggingSpanProcessor is a OpenTelemetry span processor that logs to standard out
-// in whatever format is defined by the logger.
-type LoggingSpanProcessor struct{}
-
-// Check the correct interface is implmented.
-var _ sdktrace.SpanProcessor = &LoggingSpanProcessor{}
-
-func (*LoggingSpanProcessor) OnStart(ctx context.Context, s sdktrace.ReadWriteSpan) {
-	// Logging is not free, and is disabled by default, enable with
-	// --zap-log-level=debug.
-	if log.Log.V(1).Enabled() {
-		log.Log.Info("span start", logValuesFromSpan(s)...)
-	}
-}
-
-func (*LoggingSpanProcessor) OnEnd(s sdktrace.ReadOnlySpan) {
-	// Logging is not free, and is disabled by default, enable with
-	// --zap-log-level=debug.
-	if log.Log.V(1).Enabled() || s.Status().Code == codes.Error {
-		log.Log.Info("span end", logValuesFromSpan(s)...)
-	}
-}
-
-func (*LoggingSpanProcessor) Shutdown(ctx context.Context) error {
-	return nil
-}
-
-func (*LoggingSpanProcessor) ForceFlush(ctx context.Context) error {
-	return nil
 }
 
 // headerBlackList are headers we shouldn't collect, or are covered somewhere
