@@ -29,6 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+const (
+	// Defined by RFC7235 and RFC6750.
+	AuthenticateHeader = "WWW-Authenticate"
+)
+
 // Error wraps ErrRequest with more contextual information that is used to
 // propagate and create suitable responses.
 type Error struct {
@@ -40,6 +45,9 @@ type Error struct {
 
 	// description is a verbose description to log/return to the user.
 	description string
+
+	// header is a set of propagated headers.
+	header http.Header
 
 	// err is set when the originator was an error.  This is only used
 	// for logging so as not to leak server internals to the client.
@@ -55,6 +63,7 @@ func newError(status int, code openapi.ErrorError, a ...any) *Error {
 		status:      status,
 		code:        code,
 		description: fmt.Sprint(a...),
+		header:      http.Header{},
 	}
 }
 
@@ -110,6 +119,13 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	// Emit the response to the client.
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Content-Type", "application/json")
+
+	for header, values := range e.header {
+		for _, value := range values {
+			w.Header().Add(header, value)
+		}
+	}
+
 	w.WriteHeader(e.status)
 
 	// Emit the response body.
@@ -126,15 +142,22 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := w.Write(body); err != nil {
-		log.Error(err, "failed to wirte error response")
+		log.Error(err, "failed to write error response")
 
 		return
 	}
 }
 
 // FromOpenAPIError allows propagation across API calls.
-func FromOpenAPIError(code int, err *openapi.Error) *Error {
-	return newError(code, err.Error, err.ErrorDescription)
+func FromOpenAPIError(code int, header http.Header, err *openapi.Error) *Error {
+	e := newError(code, err.Error, err.ErrorDescription)
+
+	// Propagate authentication headers across APIs.
+	if value := header.Get(AuthenticateHeader); value != "" {
+		e.header.Add(AuthenticateHeader, value)
+	}
+
+	return e
 }
 
 // HTTPForbidden is raised when a user isn't permitted to do something by RBAC.
