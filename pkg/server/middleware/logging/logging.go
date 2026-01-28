@@ -135,10 +135,14 @@ func response(w http.ResponseWriter, metrics httpsnoop.Metrics) *ResponseLog {
 func (m *Middleware) logRequest(r *http.Request) {
 	log := log.FromContext(r.Context())
 
+	// Reject anything that doesn't meet our logging threshold criteria.
+	// This avoids doing any work in gathering log data, that would be
+	// done if we used log.V().Info directly.
 	if !log.V(1).Enabled() {
 		return
 	}
 
+	// Ignore verbosity in case we filter on something other than log level,
 	log.Info("http request", "request", request(r))
 }
 
@@ -148,10 +152,14 @@ func (m *Middleware) logRequest(r *http.Request) {
 func (m *Middleware) logResponse(r *http.Request, w http.ResponseWriter, metrics httpsnoop.Metrics) {
 	log := log.FromContext(r.Context())
 
-	if !log.V(1).Enabled() || metrics.Code < 400 {
+	// Reject anything that doesn't meet our logging threshold criteria.
+	// This avoids doing any work in gathering log data, that would be
+	// done if we used log.V().Info directly.
+	if !log.V(1).Enabled() && metrics.Code < 400 {
 		return
 	}
 
+	// Ignore verbosity in case we filter on something other than log level,
 	log.Info("http response", "request", request(r), "response", response(w, metrics))
 }
 
