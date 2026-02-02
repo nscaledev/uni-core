@@ -22,13 +22,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
+	"strings"
 
 	coreerrors "github.com/unikorn-cloud/core/pkg/errors"
 	"github.com/unikorn-cloud/core/pkg/openapi"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+)
+
+const (
+	// Defined by RFC7235 and RFC6750.
+	AuthenticateHeader = "WWW-Authenticate"
 )
 
 // Error wraps ErrRequest with more contextual information that is used to
@@ -42,6 +50,9 @@ type Error struct {
 
 	// description is a verbose description to log/return to the user.
 	description string
+
+	// header is a set of propagated headers.
+	header http.Header
 
 	// err is set when the originator was an error.  This is only used
 	// for logging so as not to leak server internals to the client.
@@ -57,6 +68,7 @@ func newError(status int, code openapi.ErrorError, a ...any) *Error {
 		status:      status,
 		code:        code,
 		description: fmt.Sprint(a...),
+		header:      http.Header{},
 	}
 }
 
@@ -73,6 +85,12 @@ func (e *Error) WithError(err error) *Error {
 func (e *Error) WithValues(values ...any) *Error {
 	e.values = values
 
+	return e
+}
+
+// withHeader allows headers to be sent with the error.
+func (e *Error) withHeader(key, value string) *Error {
+	e.header.Set(key, value)
 	return e
 }
 
@@ -112,6 +130,13 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	// Emit the response to the client.
 	w.Header().Add("Cache-Control", "no-cache")
 	w.Header().Add("Content-Type", "application/json")
+
+	for header, values := range e.header {
+		for _, value := range values {
+			w.Header().Add(header, value)
+		}
+	}
+
 	w.WriteHeader(e.status)
 
 	// Emit the response body.
@@ -128,7 +153,7 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := w.Write(body); err != nil {
-		log.Error(err, "failed to wirte error response")
+		log.Error(err, "failed to write error response")
 
 		return
 	}
@@ -162,7 +187,7 @@ func isErrorType(err error, code int) bool {
 }
 
 // FromOpenAPIError allows propagation across API calls.
-func FromOpenAPIError(code int, err *openapi.Error) *Error {
+func FromOpenAPIError(code int, header http.Header, err *openapi.Error) *Error {
 	return newError(code, err.Error, err.ErrorDescription)
 }
 
@@ -244,6 +269,62 @@ func OAuth2AccessDenied(a ...any) *Error {
 	return newError(http.StatusUnauthorized, openapi.AccessDenied, a...)
 }
 
+// WWWAuthenticateHeader handles encoding of WWW-Authenticate headers.
+type WWWAuthenticateHeader struct {
+	data map[string]map[string]string
+}
+
+// NewWWWAuthenticateHeader create a new empty WWW-Authenticate header.
+func NewWWWAuthenticateHeader() *WWWAuthenticateHeader {
+	return &WWWAuthenticateHeader{
+		data: map[string]map[string]string{},
+	}
+}
+
+// AddField adds a key value field to a chanllenge type.
+func (w *WWWAuthenticateHeader) AddField(challenge, key, value string) {
+	if _, ok := w.data[challenge]; !ok {
+		w.data[challenge] = map[string]string{}
+	}
+
+	w.data[challenge][key] = value
+}
+
+// Encode turns the header into a string ready for the wire.  It ensures
+// deterministic output.
+func (w *WWWAuthenticateHeader) Encode() string {
+	challenges := make([]string, len(w.data))
+
+	challengeKeys := slices.Collect(maps.Keys(w.data))
+	slices.Sort(challengeKeys)
+
+	for i, challenge := range challengeKeys {
+		fields := make([]string, len(w.data[challenge]))
+
+		fieldKeys := slices.Collect(maps.Keys(w.data[challenge]))
+		slices.Sort(fieldKeys)
+
+		for j, key := range fieldKeys {
+			fields[j] = fmt.Sprintf(`%s="%s"`, key, w.data[challenge][key])
+		}
+
+		challenges[i] = fmt.Sprintf("%s %s", challenge, strings.Join(fields, ","))
+	}
+
+	return strings.Join(challenges, ", ")
+}
+
+// AccessDenied replaces OAuth2AccessDenied.  It must be provided with the current host
+// and that must implement the oidc protected resource metadata endpoint (RFC9728).
+func AccessDenied(host string, a ...any) *Error {
+	header := NewWWWAuthenticateHeader()
+	header.AddField("Bearer", "error", string(openapi.AccessDenied))
+	header.AddField("Bearer", "error_description", fmt.Sprint(a...))
+	header.AddField("Bearer", "resource_metadata", "https://"+host+"/.well-known/openid-protected-resource")
+
+	return newError(http.StatusUnauthorized, openapi.AccessDenied, a...).withHeader(AuthenticateHeader, header.Encode())
+}
+
 // IsAccessDenied checks if the error is as described.
 func IsAccessDenied(err error) bool {
 	return isErrorType(err, http.StatusUnauthorized)
@@ -258,9 +339,11 @@ func OAuth2ServerError(a ...any) *Error {
 
 // PropagateError provides a response type agnostic way of extracting a human readable
 // error from an API.
-func PropagateError(statusCode int, response any) error {
-	if statusCode < 400 {
-		return fmt.Errorf("%w: status code %d not valid", coreerrors.ErrAPIStatus, statusCode)
+// NOTE: the *WithResponse APIs will have read and closed the body already and decoded
+// the JSON error.  We just need to get at it, which is tricky!
+func PropagateError(r *http.Response, response any) error {
+	if r.StatusCode < 400 {
+		return fmt.Errorf("%w: status code %d not valid", coreerrors.ErrAPIStatus, r.StatusCode)
 	}
 
 	// We expect the response to be a pointer to a struct...
@@ -275,7 +358,7 @@ func PropagateError(statusCode int, response any) error {
 	}
 
 	// ... that through the magic of autogeneration has a field for the status code ...
-	fieldName := fmt.Sprintf("JSON%d", statusCode)
+	fieldName := fmt.Sprintf("JSON%d", r.StatusCode)
 
 	f := v.FieldByName(fieldName)
 	if !f.IsValid() {
@@ -296,7 +379,7 @@ func PropagateError(statusCode int, response any) error {
 		return fmt.Errorf("%w: unable to assert error", coreerrors.ErrTypeConversion)
 	}
 
-	return newError(statusCode, concreteError.Error, concreteError.ErrorDescription)
+	return FromOpenAPIError(r.StatusCode, r.Header, concreteError)
 }
 
 // HandleError is the top level error handler that should be called from all

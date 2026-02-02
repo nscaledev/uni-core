@@ -38,6 +38,9 @@ const (
 	ResourceProvisioningStatusUnknown        ResourceProvisioningStatus = "unknown"
 )
 
+// AuthorizationServerList List of authorization servers that can grant access to the resource.
+type AuthorizationServerList = []string
+
 // Error Generic error message, compatible with oauth2.
 type Error struct {
 	// Error A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
@@ -53,6 +56,15 @@ type ErrorError string
 // KubernetesLabelValue A valid Kubernetes label value, typically used for resource names that can be
 // indexed in the database.
 type KubernetesLabelValue = string
+
+// OpenidProtectedResource OpenID athentication server discovery configuration.
+type OpenidProtectedResource struct {
+	// AuthorizationServers List of authorization servers that can grant access to the resource.
+	AuthorizationServers AuthorizationServerList `json:"authorization_servers"`
+
+	// Resource The protected resource's scheme and hostname.
+	Resource string `json:"resource"`
+}
 
 // OrganizationScopedResourceReadMetadata defines model for organizationScopedResourceReadMetadata.
 type OrganizationScopedResourceReadMetadata struct {
@@ -259,6 +271,9 @@ type InternalServerErrorResponse = Error
 
 // NotFoundResponse Generic error message, compatible with oauth2.
 type NotFoundResponse = Error
+
+// OpenidProtectedResourceResponse OpenID athentication server discovery configuration.
+type OpenidProtectedResourceResponse = OpenidProtectedResource
 
 // UnauthorizedResponse Generic error message, compatible with oauth2.
 type UnauthorizedResponse = Error

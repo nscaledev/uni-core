@@ -20,6 +20,7 @@ package api
 import (
 	goerrors "errors"
 	"fmt"
+	"net/http"
 	"reflect"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
@@ -70,5 +71,5 @@ func ExtractError(statusCode int, response any) error {
 		return fmt.Errorf("%w: unable to assert error", ErrExtraction)
 	}
 
-	return errors.FromOpenAPIError(statusCode, concreteError)
+	return errors.FromOpenAPIError(statusCode, http.Header{}, concreteError)
 }
