@@ -99,6 +99,15 @@ func TestDefault(t *testing.T) {
 	test.validate(t, w)
 }
 
+// TestFormatting tests argument formatting works like Sprintln without the ln.
+func TestFormatting(t *testing.T) {
+	t.Parallel()
+
+	err := errors.HTTPForbidden("this", "should", "add", "spaces")
+
+	require.Equal(t, "this should add spaces", err.Error())
+}
+
 // TestNoContext tests handlers that provide no further context.
 func TestNoContext(t *testing.T) {
 	t.Parallel()
