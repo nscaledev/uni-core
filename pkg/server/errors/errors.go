@@ -67,7 +67,7 @@ func newError(status int, code openapi.ErrorError, a ...any) *Error {
 	return &Error{
 		status:      status,
 		code:        code,
-		description: fmt.Sprint(a...),
+		description: strings.TrimSuffix(fmt.Sprintln(a...), "\n"),
 		header:      http.Header{},
 	}
 }
