@@ -227,9 +227,10 @@ func TestWithContext(t *testing.T) {
 func TestUnauthorized(t *testing.T) {
 	t.Parallel()
 
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://acme.com/", nil)
 	w := httptest.NewRecorder()
 
-	errors.HandleError(w, request(t), errors.AccessDenied("acme.com", "cat"))
+	errors.HandleError(w, request(t), errors.AccessDenied(r, "cat"))
 
 	require.NotEmpty(t, w.Header().Get(errors.AuthenticateHeader))
 	require.Equal(t, `Bearer error="access_denied",error_description="cat",resource_metadata="https://acme.com/.well-known/openid-protected-resource"`, w.Header().Get(errors.AuthenticateHeader))
