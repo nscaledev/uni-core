@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// Defines values for BearerMethod.
+const (
+	Body   BearerMethod = "body"
+	Header BearerMethod = "header"
+	Query  BearerMethod = "query"
+)
+
 // Defines values for ErrorError.
 const (
 	AccessDenied          ErrorError = "access_denied"
@@ -41,6 +48,12 @@ const (
 // AuthorizationServerList List of authorization servers that can grant access to the resource.
 type AuthorizationServerList = []string
 
+// BearerMethod Bearer token transport method
+type BearerMethod string
+
+// BearerMethodList A set of bearer token transport methods supported by the protected endpoint.
+type BearerMethodList = []BearerMethod
+
 // Error Generic error message, compatible with oauth2.
 type Error struct {
 	// Error A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
@@ -62,8 +75,14 @@ type OpenidProtectedResource struct {
 	// AuthorizationServers List of authorization servers that can grant access to the resource.
 	AuthorizationServers AuthorizationServerList `json:"authorization_servers"`
 
+	// BearerMethodsSupported A set of bearer token transport methods supported by the protected endpoint.
+	BearerMethodsSupported BearerMethodList `json:"bearer_methods_supported"`
+
 	// Resource The protected resource's scheme and hostname.
 	Resource string `json:"resource"`
+
+	// ScopesSupported A set of OIDC scopes that are required for authorization.
+	ScopesSupported ScopeList `json:"scopes_supported"`
 }
 
 // OrganizationScopedResourceReadMetadata defines model for organizationScopedResourceReadMetadata.
@@ -207,6 +226,9 @@ type ResourceReadMetadata struct {
 
 // ResourceWriteMetadata Metadata required for all API resource reads and writes.
 type ResourceWriteMetadata = ResourceMetadata
+
+// ScopeList A set of OIDC scopes that are required for authorization.
+type ScopeList = []string
 
 // Semver A semantic version in the form v1.2.3.
 // Pre-releases and variants are not currently supported.

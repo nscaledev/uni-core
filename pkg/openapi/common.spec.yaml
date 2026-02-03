@@ -180,18 +180,41 @@ components:
       items:
         description: An authorization server's scheme and hostname.
         type: string
+    bearerMethod:
+      description: Bearer token transport method
+      type: string
+      enum:
+      - header
+      - body
+      - query
+    bearerMethodList:
+      description: A set of bearer token transport methods supported by the protected endpoint.
+      type: array
+      items:
+        $ref: '#/components/schemas/bearerMethod'
+    scopeList:
+      description: A set of OIDC scopes that are required for authorization.
+      type: array
+      items:
+        type: string
     openidProtectedResource:
       description: OpenID athentication server discovery configuration.
       type: object
       required:
       - resource
       - authorization_servers
+      - scopes_supported
+      - bearer_methods_supported
       properties:
         resource:
           description: The protected resource's scheme and hostname.
           type: string
         authorization_servers:
           $ref: '#/components/schemas/authorizationServerList'
+        scopes_supported:
+          $ref: '#/components/schemas/scopeList'
+        bearer_methods_supported:
+          $ref: '#/components/schemas/bearerMethodList'
   responses:
     acceptedResponse:
       description: |-
@@ -286,3 +309,9 @@ components:
             resource: https://endpoint.acme.com
             authorization_servers:
             - http://auth.acme.com
+            scopes_supported:
+            - openid
+            - profile
+            - email
+            bearer_methods_supported:
+            - header
