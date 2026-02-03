@@ -320,7 +320,7 @@ func AccessDenied(r *http.Request, a ...any) *Error {
 	header := NewWWWAuthenticateHeader()
 	header.AddField("Bearer", "error", string(openapi.AccessDenied))
 	header.AddField("Bearer", "error_description", fmt.Sprint(a...))
-	header.AddField("Bearer", "resource_metadata", "https://"+r.URL.Host+"/.well-known/openid-protected-resource")
+	header.AddField("Bearer", "resource_metadata", "https://"+r.Host+"/.well-known/openid-protected-resource")
 
 	return newError(http.StatusUnauthorized, openapi.AccessDenied, a...).withHeader(AuthenticateHeader, header.Encode())
 }
