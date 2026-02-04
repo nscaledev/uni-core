@@ -40,6 +40,9 @@ components:
         error_description:
           description: Verbose message describing the error.
           type: string
+        trace_id:
+          description: Unique trace identifier for the request.
+          type: string
     kubernetesLabelValue:
       description: |-
         A valid Kubernetes label value, typically used for resource names that can be
@@ -232,6 +235,7 @@ components:
           example:
             error: invalid_request
             error_description: request body invalid
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     unauthorizedResponse:
       description: |-
         Authentication failed or the access token has expired.
@@ -242,6 +246,7 @@ components:
           example:
             error: access_denied
             error_description: authentication failed
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     forbiddenResponse:
       description: |-
         Request was denied by authorization, this may be caused by the authorization
@@ -254,6 +259,7 @@ components:
           example:
             error: forbidden
             error_description: user credentials do not have the required privileges
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     notFoundResponse:
       description: |-
         Unable to find a resource.
@@ -264,6 +270,7 @@ components:
           example:
             error: not_found
             error_description: the requested resource does not exist
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     conflictResponse:
       description: |-
         Resource conflicts with another, usually this means they have the same name.
@@ -274,6 +281,7 @@ components:
           example:
             error: conflict
             error_description: a resource with the same name already exists
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     unprocessableContentResponse:
       description: |-
         The provided request was syntactically correct but the instruction was unable to
@@ -285,6 +293,7 @@ components:
           example:
             error: unprocessable_content
             error_description: the request body was in the wrong format
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     internalServerErrorResponse:
       description: |-
         An unexpected or unhandled error occurred. This may be a transient error and
@@ -296,6 +305,7 @@ components:
           example:
             error: server_error
             error_description: failed to token claim
+            trace_id: 57bc14d9bd461f0b5a72db830149b67a
     openidProtectedResourceResponse:
       description: |-
         OpenID configuration used to discover authentication servers when hitting
