@@ -28,8 +28,12 @@ import (
 	"slices"
 	"strings"
 
+	"go.opentelemetry.io/otel/trace"
+
 	coreerrors "github.com/unikorn-cloud/core/pkg/errors"
 	"github.com/unikorn-cloud/core/pkg/openapi"
+
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -143,6 +147,10 @@ func (e *Error) Write(w http.ResponseWriter, r *http.Request) {
 	ge := &openapi.Error{
 		Error:            e.code,
 		ErrorDescription: e.description,
+	}
+
+	if id := trace.SpanContextFromContext(r.Context()).TraceID().String(); id != "" {
+		ge.TraceId = ptr.To(id)
 	}
 
 	body, err := json.Marshal(ge)

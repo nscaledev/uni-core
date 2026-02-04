@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/unikorn-cloud/core/pkg/openapi"
 	"github.com/unikorn-cloud/core/pkg/server/errors"
@@ -106,6 +107,32 @@ func TestFormatting(t *testing.T) {
 	err := errors.HTTPForbidden("this", "should", "add", "spaces")
 
 	require.Equal(t, "this should add spaces", err.Error())
+}
+
+// TestTraceID tests that if a span context is available the trace ID is returned
+// to the user for propagation on to support.
+func TestTraceID(t *testing.T) {
+	t.Parallel()
+
+	traceID, err := trace.TraceIDFromHex("0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+
+	spanContextConfig := trace.SpanContextConfig{
+		TraceID: traceID,
+	}
+
+	ctx := trace.ContextWithSpanContext(t.Context(), trace.NewSpanContext(spanContextConfig))
+
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "http://acme.com", nil)
+	w := httptest.NewRecorder()
+
+	errors.HandleError(w, r, errors.HTTPForbidden("you shall not pass!"))
+
+	var oapiErr openapi.Error
+
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &oapiErr))
+	require.NotNil(t, oapiErr.TraceId)
+	require.Equal(t, "0123456789abcdef0123456789abcdef", *oapiErr.TraceId)
 }
 
 // TestNoContext tests handlers that provide no further context.

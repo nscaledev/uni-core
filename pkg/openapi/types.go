@@ -61,6 +61,9 @@ type Error struct {
 
 	// ErrorDescription Verbose message describing the error.
 	ErrorDescription string `json:"error_description"`
+
+	// TraceId Unique trace identifier for the request.
+	TraceId *string `json:"trace_id,omitempty"`
 }
 
 // ErrorError A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
