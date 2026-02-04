@@ -19,10 +19,9 @@ package util
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/unikorn-cloud/core/pkg/server/errors"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -48,14 +47,15 @@ func WriteJSONResponse(w http.ResponseWriter, r *http.Request, code int, respons
 }
 
 // ReadJSONBody is a generic request reader to unmarshal JSON bodies.
+// NOTE: This should have passed OpenAPI validation, so is an internal error.
 func ReadJSONBody(r *http.Request, v any) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		return errors.OAuth2ServerError("unable to read request body").WithError(err)
+		return fmt.Errorf("%w: unable to read request body", err)
 	}
 
 	if err := json.Unmarshal(body, v); err != nil {
-		return errors.OAuth2ServerError("unable to unmarshal request body").WithError(err)
+		return fmt.Errorf("%w: unable to unmarshal request body", err)
 	}
 
 	return nil
