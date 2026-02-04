@@ -18,8 +18,11 @@ limitations under the License.
 package util
 
 import (
+	"fmt"
+
 	"github.com/unikorn-cloud/core/pkg/constants"
-	"github.com/unikorn-cloud/core/pkg/server/errors"
+	"github.com/unikorn-cloud/core/pkg/errors"
+	servererrors "github.com/unikorn-cloud/core/pkg/server/errors"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -37,11 +40,11 @@ func AssertOrganizationOwnership(resource metav1.Object, organizationID string) 
 
 	id, ok := labels[constants.OrganizationLabel]
 	if !ok {
-		return errors.OAuth2ServerError("resource missing organization label")
+		return fmt.Errorf("%w: resource missing organization label", errors.ErrConsistency)
 	}
 
 	if id != organizationID {
-		return errors.HTTPNotFound()
+		return servererrors.HTTPNotFound()
 	}
 
 	return nil
@@ -58,11 +61,11 @@ func AssertProjectOwnership(resource metav1.Object, organizationID, projectID st
 
 	id, ok := labels[constants.ProjectLabel]
 	if !ok {
-		return errors.OAuth2ServerError("resource missing organization label")
+		return fmt.Errorf("%w: resource missing projectlabel", errors.ErrConsistency)
 	}
 
 	if id != projectID {
-		return errors.HTTPNotFound()
+		return servererrors.HTTPNotFound()
 	}
 
 	return nil

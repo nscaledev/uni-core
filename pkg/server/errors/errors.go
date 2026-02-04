@@ -338,13 +338,6 @@ func IsAccessDenied(err error) bool {
 	return isErrorType(err, http.StatusUnauthorized)
 }
 
-// OAuth2ServerError tells the client we are at fault, this should never be seen
-// in production.  If so then our testing needs to improve.
-// Deprecated: this should be deleted everywhere and implicit handling used for brevity.
-func OAuth2ServerError(a ...any) *Error {
-	return newError(http.StatusInternalServerError, openapi.ServerError, a...)
-}
-
 // PropagateError provides a response type agnostic way of extracting a human readable
 // error from an API.
 // NOTE: the *WithResponse APIs will have read and closed the body already and decoded
@@ -399,5 +392,5 @@ func HandleError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	OAuth2ServerError("an internal error has occurred, please contact support").WithError(err).Write(w, r)
+	newError(http.StatusInternalServerError, openapi.ServerError, "an internal error has occurred, please contact support").WithError(err).Write(w, r)
 }
