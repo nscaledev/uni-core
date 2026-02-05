@@ -76,6 +76,19 @@ components:
       type: array
       items:    
         $ref: '#/components/schemas/tag'
+    noReservedTags:
+      description: Constrain tags to not have reserved names.
+      type: object
+      properties:
+        tags:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                not:
+                  type: string
+                  pattern: "^[a-z]+\\.unikorn-cloud\\.org:"
     resourceMetadata:
       description: Metadata required for all API resource reads and writes.
       required:
