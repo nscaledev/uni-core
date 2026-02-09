@@ -4,8 +4,8 @@ description: A Helm chart for deploying Unikorn Core
 
 type: application
 
-version: 1.14.0-rc4
-appVersion: 1.14.0-rc4
+version: 1.14.0
+appVersion: 1.14.0
 
 icon: https://assets.unikorn-cloud.org/images/logos/dark-on-light/icon.svg
 
