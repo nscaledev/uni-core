@@ -31,6 +31,8 @@ import (
 	"context"
 	"slices"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -226,6 +228,153 @@ func TestInvalidation(t *testing.T) {
 	require.NoError(t, err)
 
 	require.False(t, snapshot1.Epoch.Valid(snapshot2.Epoch))
+}
+
+// TestConcurrentInvalidation tests that concurrent callers all unblock without
+// error, and that coalescing ensures significantly fewer refreshes than callers.
+func TestConcurrentInvalidation(t *testing.T) {
+	t.Parallel()
+
+	generator := &incrementingGenerator{size: 16}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[myType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	initialGeneration := generator.generation
+
+	const n = 10
+
+	// Release all goroutines simultaneously to maximise coalescing.
+	start := make(chan struct{})
+
+	results := make([]error, n)
+
+	var wg sync.WaitGroup
+
+	for i := range n {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			<-start
+
+			results[i] = c.Invalidate()
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	for _, err := range results {
+		require.NoError(t, err)
+	}
+
+	// Each refresh takes ~1s (incrementingGenerator delay).  With coalescing,
+	// N concurrent callers should trigger far fewer than N refreshes.
+	refreshes := generator.generation - initialGeneration
+	require.Less(t, refreshes, n)
+}
+
+// TestInvalidationFreshness tests that every caller of Invalidate sees cache
+// data that was generated after their call, not from a refresh that was already
+// in progress when they called it.
+func TestInvalidationFreshness(t *testing.T) {
+	t.Parallel()
+
+	var gen atomic.Int32
+
+	// started is closed by the first non-warmup refresh once it has incremented
+	// the generation counter, signalling that it is in progress.
+	started := make(chan struct{})
+	// proceed is closed by the test to release the blocked refresh.
+	proceed := make(chan struct{})
+
+	refresh := func(_ context.Context) ([]*myType, error) {
+		n := int(gen.Add(1)) - 1
+
+		items := make([]*myType, 16)
+		for i := range items {
+			items[i] = &myType{id: n + i}
+		}
+
+		// Warmup call (n==0) runs freely; subsequent calls block until the
+		// test releases them, giving other goroutines time to arrive.
+		if n > 0 {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+
+			<-proceed
+		}
+
+		return items, nil
+	}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[myType](refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	// Trigger a refresh and let it block inside the refresh function.
+	go func() { _ = c.Invalidate() }()
+
+	// Wait until the refresh is in progress and the generation counter has
+	// already been incremented.
+	<-started
+
+	// These goroutines arrive while the refresh is in flight.  Each records
+	// the current generation as the minimum id its result must satisfy.
+	const n = 5
+
+	type result struct {
+		minIDAtCall int
+		snapshot    *cache.ListSnapshot[myType]
+		err         error
+	}
+
+	results := make([]result, n)
+
+	var wg sync.WaitGroup
+
+	for i := range n {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			minID := int(gen.Load())
+
+			if err := c.Invalidate(); err != nil {
+				results[i].err = err
+				return
+			}
+
+			snapshot, err := c.List()
+			results[i] = result{minIDAtCall: minID, snapshot: snapshot, err: err}
+		}()
+	}
+
+	// Release the blocked refresh and wait for all callers to return.
+	close(proceed)
+	wg.Wait()
+
+	for _, r := range results {
+		require.NoError(t, r.err)
+
+		for _, item := range r.snapshot.Items {
+			require.GreaterOrEqual(t, item.id, r.minIDAtCall,
+				"cache item predates the Invalidate call")
+		}
+	}
 }
 
 // TestInvavalidationErrors checks that invalidation gracefully handles
