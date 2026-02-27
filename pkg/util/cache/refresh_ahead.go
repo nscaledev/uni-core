@@ -214,6 +214,12 @@ type RefreshAheadCache[T any, TP CacheablePointer[T]] struct {
 	// perform a refresh, useful for situations where you need a value
 	// to be visible in the cache before continuation.
 	invalidations chan *invalidationRequest
+
+	// pendingLock guards pending.
+	pendingLock sync.Mutex
+	// pending is the in-flight invalidation request, if any.  Concurrent
+	// callers coalesce onto this rather than each queuing a separate refresh.
+	pending *invalidationRequest
 }
 
 // NewRefreshAheadCache constructs a new refresh ahead cache.
@@ -249,6 +255,13 @@ func (c *RefreshAheadCache[T, TP]) Run(ctx context.Context) error {
 				close(c.invalidations)
 				return
 			case request := <-c.invalidations:
+				// This request is about to be attempted. Clear the pending field so that the next
+				// caller of Invalidate will create their own pending request, and not glom
+				// onto this one while it's in flight.
+				c.pendingLock.Lock()
+				c.pending = nil
+				c.pendingLock.Unlock()
+
 				request.err = c.doRefresh(ctx)
 				close(request.done)
 			case <-ticker.C:
@@ -267,26 +280,64 @@ func (c *RefreshAheadCache[T, TP]) Run(ctx context.Context) error {
 // Invalidate performs a synchronous invalidation of the cache and only
 // returns control to the client when the refresh has completed, guaranteeing
 // on success that the cache will contain any new values.
-func (c *RefreshAheadCache[T, TP]) Invalidate() (err error) {
-	// Handle invalidation of a shutdown cache.
+func (c *RefreshAheadCache[T, TP]) Invalidate() error {
+	c.pendingLock.Lock()
+
+	// Concurrent callers coalesce: if a refresh is already waiting, the caller will
+	// wait for the same refresh and receive its result, rather than blocking on its
+	// own refresh.
+	if c.pending != nil {
+		req := c.pending
+		c.pendingLock.Unlock()
+
+		<-req.done
+
+		return req.err
+	}
+
+	// We are the designated sender for this round.
+	request := &invalidationRequest{
+		done: make(chan any),
+	}
+
+	c.pending = request
+	c.pendingLock.Unlock()
+
+	// sendInvalidation handles the send with panic recovery so that if the
+	// channel has been closed by a shutdown it cleans up correctly and
+	// unblocks any callers already waiting on request.done.
+	if err := c.sendInvalidation(request); err != nil {
+		return err
+	}
+
+	<-request.done
+
+	return request.err
+}
+
+// sendInvalidation sends request to the refresh goroutine.  If the channel
+// has been closed (cache shutdown) the resulting panic is recovered, pending
+// is cleared, and any goroutines already waiting on request.done are
+// unblocked with ErrInvalid.
+func (c *RefreshAheadCache[T, TP]) sendInvalidation(request *invalidationRequest) (err error) {
 	defer func() {
 		if x := recover(); x != nil {
+			request.err = ErrInvalid
+
+			c.pendingLock.Lock()
+			c.pending = nil
+			c.pendingLock.Unlock()
+
+			close(request.done)
+
 			err = ErrInvalid
 		}
 	}()
 
-	request := invalidationRequest{
-		done: make(chan any),
-	}
+	// NOTE: callers will block here until the channel is initialized by Run().
+	c.invalidations <- request
 
-	// NOTE: clients will block until the channel is initialized by Run().
-	c.invalidations <- &request
-
-	<-request.done
-
-	err = request.err
-
-	return
+	return nil
 }
 
 // Get does a zero copy read of a specified item.
