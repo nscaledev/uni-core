@@ -75,6 +75,13 @@ type ControllerUpgrader interface {
 	Upgrade(ctx context.Context, cli client.Client, options *options.Options) error
 }
 
+// ControllerInitializer when implemented on a factory lets it prepare any dependencies,
+// after the manager has been constructed and before the factory is called on to create
+// a controller.
+type ControllerInitializer interface {
+	Initialize(ctx context.Context, mgr manager.Manager, opts *options.Options) error
+}
+
 // getManager returns a generic manager.
 func getManager(f ControllerFactory) (manager.Manager, error) {
 	// Create a manager with leadership election to prevent split brain
@@ -145,6 +152,18 @@ func doUpgrade(f ControllerFactory, options *options.Options) error {
 	return nil
 }
 
+func doInitialize(f ControllerFactory, mgr manager.Manager, options *options.Options) error {
+	if init, ok := f.(ControllerInitializer); ok {
+		ctx := context.TODO()
+
+		if err := init.Initialize(ctx, mgr, options); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Run provides common manager initialization and execution.
 func Run(f ControllerFactory) {
 	o := &options.Options{}
@@ -179,6 +198,11 @@ func Run(f ControllerFactory) {
 	manager, err := getManager(f)
 	if err != nil {
 		logger.Error(err, "manager creation error")
+		os.Exit(1)
+	}
+
+	if err := doInitialize(f, manager, o); err != nil {
+		logger.Error(err, "factory initialization failed")
 		os.Exit(1)
 	}
 
