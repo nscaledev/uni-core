@@ -255,6 +255,13 @@ func (c *RefreshAheadCache[T, TP]) Run(ctx context.Context) error {
 				close(c.invalidations)
 				return
 			case request := <-c.invalidations:
+				// This request is about to be attempted. Clear the pending field so that the next
+				// caller of Invalidate will create their own pending request, and not glom
+				// onto this one while it's in flight.
+				c.pendingLock.Lock()
+				c.pending = nil
+				c.pendingLock.Unlock()
+
 				request.err = c.doRefresh(ctx)
 				close(request.done)
 			case <-ticker.C:
@@ -302,10 +309,6 @@ func (c *RefreshAheadCache[T, TP]) Invalidate() error {
 	if err := c.sendInvalidation(request); err != nil {
 		return err
 	}
-
-	c.pendingLock.Lock()
-	c.pending = nil
-	c.pendingLock.Unlock()
 
 	<-request.done
 
