@@ -25,7 +25,9 @@ import (
 
 	"github.com/unikorn-cloud/core/pkg/constants"
 	"github.com/unikorn-cloud/core/pkg/errors"
+	"github.com/unikorn-cloud/core/pkg/provisioners"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -127,6 +129,10 @@ func AddResourceReference(ctx context.Context, cli client.Client, resource clien
 	}
 
 	if err := cli.Update(ctx, resource); err != nil {
+		if kerrors.IsConflict(err) {
+			return provisioners.ErrYield
+		}
+
 		return err
 	}
 
@@ -163,6 +169,10 @@ func AddResourceReferences(ctx context.Context, cli client.Client, resources cli
 		}
 
 		if err := cli.Update(ctx, resource); err != nil {
+			if kerrors.IsConflict(err) {
+				return provisioners.ErrYield
+			}
+
 			return err
 		}
 	}
@@ -188,6 +198,10 @@ func RemoveResourceReference(ctx context.Context, cli client.Client, resource cl
 	}
 
 	if err := cli.Update(ctx, resource); err != nil {
+		if kerrors.IsConflict(err) {
+			return provisioners.ErrYield
+		}
+
 		return err
 	}
 
@@ -223,6 +237,10 @@ func RemoveResourceReferences(ctx context.Context, cli client.Client, resources 
 		}
 
 		if err := cli.Update(ctx, object); err != nil {
+			if kerrors.IsConflict(err) {
+				return provisioners.ErrYield
+			}
+
 			return err
 		}
 
