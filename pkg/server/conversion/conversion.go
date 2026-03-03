@@ -55,10 +55,10 @@ func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus
 		return openapi.ResourceProvisioningStatusProvisioned
 	}
 
-	// No condition yet, it's unknown.
+	// No condition yet, it's pending.
 	condition, err := reader.StatusConditionRead(unikornv1.ConditionAvailable)
 	if err != nil {
-		return openapi.ResourceProvisioningStatusUnknown
+		return openapi.ResourceProvisioningStatusPending
 	}
 
 	//nolint:exhaustive

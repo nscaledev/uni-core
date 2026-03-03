@@ -123,7 +123,7 @@ func TestResourceReadMetadataBasic(t *testing.T) {
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
 	require.Equal(t, creationTime, out.CreationTime)
-	require.Equal(t, openapi.ResourceProvisioningStatusUnknown, out.ProvisioningStatus)
+	require.Equal(t, openapi.ResourceProvisioningStatusPending, out.ProvisioningStatus)
 	require.Equal(t, openapi.ResourceHealthStatusUnknown, out.HealthStatus)
 
 	require.Nil(t, out.Description)

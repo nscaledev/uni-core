@@ -40,6 +40,7 @@ const (
 const (
 	ResourceProvisioningStatusDeprovisioning ResourceProvisioningStatus = "deprovisioning"
 	ResourceProvisioningStatusError          ResourceProvisioningStatus = "error"
+	ResourceProvisioningStatusPending        ResourceProvisioningStatus = "pending"
 	ResourceProvisioningStatusProvisioned    ResourceProvisioningStatus = "provisioned"
 	ResourceProvisioningStatusProvisioning   ResourceProvisioningStatus = "provisioning"
 	ResourceProvisioningStatusUnknown        ResourceProvisioningStatus = "unknown"
