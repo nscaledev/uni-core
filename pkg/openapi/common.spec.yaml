@@ -137,6 +137,7 @@ components:
       type: string
       enum:
       - unknown
+      - pending
       - provisioning
       - provisioned
       - deprovisioning
