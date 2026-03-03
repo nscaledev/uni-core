@@ -56,7 +56,7 @@ type StatusConditionWriter interface {
 	// StatusConditionWrite either adds or updates a condition in the resource
 	// status. If the condition, status and message match an existing condition
 	// the update is ignored.
-	StatusConditionWrite(t ConditionType, status corev1.ConditionStatus, reason ConditionReason, message string)
+	StatusConditionWrite(t ConditionType, status corev1.ConditionStatus, reason string, message string)
 }
 
 // ManagableResourceInterface is a resource type that can be manged e.g. has a

@@ -67,7 +67,7 @@ func GetCondition(conditions []Condition, t ConditionType) (*Condition, error) {
 // UpdateCondition either adds or updates a condition in the resource
 // status. If the condition, status and message match an existing condition
 // the update is ignored.
-func UpdateCondition(conditions *[]Condition, t ConditionType, status corev1.ConditionStatus, reason ConditionReason, message string) {
+func UpdateCondition(conditions *[]Condition, t ConditionType, status corev1.ConditionStatus, reason string, message string) {
 	condition := Condition{
 		Type:               t,
 		Status:             status,
@@ -91,6 +91,43 @@ func UpdateCondition(conditions *[]Condition, t ConditionType, status corev1.Con
 	if existing != condition {
 		*existingPtr = condition
 	}
+}
+
+// TypedCondition allows the condition reasons of a condition to be narrowed.
+// +k8s:deepcopy-gen=false
+type TypedCondition[R ~string] struct {
+	// Type is the type of the condition.
+	Type ConditionType
+	// Status is the status of the condition.
+	// Can be True, False, Unknown.
+	Status corev1.ConditionStatus
+	// Last time the condition transitioned from one status to another.
+	LastTransitionTime metav1.Time
+	// Unique, one-word, CamelCase reason for the condition's last transition.
+	Reason R
+	// Human-readable message indicating details about last transition.
+	Message string
+}
+
+func GetTypedCondition[R ~string](r StatusConditionReader, t ConditionType) (*TypedCondition[R], error) {
+	condition, err := r.StatusConditionRead(t)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &TypedCondition[R]{
+		Type:               condition.Type,
+		Status:             condition.Status,
+		LastTransitionTime: condition.LastTransitionTime,
+		Reason:             R(condition.Reason),
+		Message:            condition.Message,
+	}
+
+	return out, nil
+}
+
+func SetTypedCondition[R ~string](w StatusConditionWriter, t ConditionType, status corev1.ConditionStatus, reason R, message string) {
+	w.StatusConditionWrite(t, status, string(reason), message)
 }
 
 // Contains returns if the k/v tag exists in the list.

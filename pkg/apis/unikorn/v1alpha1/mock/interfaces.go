@@ -158,7 +158,7 @@ func (m *MockStatusConditionWriter) EXPECT() *MockStatusConditionWriterMockRecor
 }
 
 // StatusConditionWrite mocks base method.
-func (m *MockStatusConditionWriter) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason v1alpha1.ConditionReason, message string) {
+func (m *MockStatusConditionWriter) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason, message string) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "StatusConditionWrite", t, status, reason, message)
 }
@@ -655,7 +655,7 @@ func (mr *MockManagableResourceInterfaceMockRecorder) StatusConditionRead(t any)
 }
 
 // StatusConditionWrite mocks base method.
-func (m *MockManagableResourceInterface) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason v1alpha1.ConditionReason, message string) {
+func (m *MockManagableResourceInterface) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason, message string) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "StatusConditionWrite", t, status, reason, message)
 }

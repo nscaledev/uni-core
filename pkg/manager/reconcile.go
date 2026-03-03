@@ -271,7 +271,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikornv1.ManagableResourceInterface, err error, deprovision bool) error {
 	var status corev1.ConditionStatus
 
-	var reason unikornv1.ConditionReason
+	var reason unikornv1.ProvisioningConditionReason
 
 	var message string
 
@@ -295,16 +295,15 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 			message = "Deprovisioning"
 		}
 	case errors.Is(err, context.Canceled):
-		status = corev1.ConditionFalse
-		reason = unikornv1.ConditionReasonCancelled
-		message = "Aborted due to controller shutdown"
+		// Leave it as it is.
+		return nil
 	default:
 		status = corev1.ConditionFalse
 		reason = unikornv1.ConditionReasonErrored
 		message = fmt.Sprintf("Unhandled error: %v", err)
 	}
 
-	object.StatusConditionWrite(unikornv1.ConditionAvailable, status, reason, message)
+	unikornv1.SetTypedCondition(object, unikornv1.ConditionAvailable, status, reason, message)
 
 	if err := r.manager.GetClient().Status().Update(ctx, object); err != nil {
 		return err
