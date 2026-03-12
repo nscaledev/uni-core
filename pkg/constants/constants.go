@@ -108,6 +108,10 @@ const (
 	// to a specific cluster.
 	ComputeClusterLabel = "unikorn-cloud.org/computecluster"
 
+	// ComputeInstanceLabel is applied to resources to indicate they belong
+	// to a specific computeinstance.
+	ComputeInstanceLabel = "compute.unikorn-cloud.org/instance-id"
+
 	// ApplicationLabel is applied to ArgoCD applications to differentiate
 	// between them.
 	ApplicationLabel = "unikorn-cloud.org/application"
