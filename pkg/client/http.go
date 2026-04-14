@@ -24,6 +24,8 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/spf13/pflag"
@@ -34,6 +36,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+const defaultClientCertificateReloadInterval = 24 * time.Hour
 
 // HTTPOptions are generic options for HTTP clients.
 type HTTPOptions struct {
@@ -102,12 +106,103 @@ type HTTPClientOptions struct {
 	secretNamespace string
 	// secretName is the client certificate for the service.
 	secretName string
+	// reloadInterval determines how often the client certificate is reloaded.
+	reloadInterval time.Duration
+	now            func() time.Time
 }
 
 // AddFlags adds the options to the CLI flags.
 func (o *HTTPClientOptions) AddFlags(f *pflag.FlagSet) {
 	f.StringVar(&o.secretNamespace, "client-certificate-namespace", o.secretNamespace, "Client certificate secret namespace.")
 	f.StringVar(&o.secretName, "client-certificate-name", o.secretName, "Client certificate secret name.")
+	f.DurationVar(&o.reloadInterval, "client-certificate-reload-interval", defaultClientCertificateReloadInterval, "How often to check for a rotated client certificate. Zero or negative disables periodic reload.")
+}
+
+// SetNow overrides the clock used for inline client certificate reload checks.
+func (o *HTTPClientOptions) SetNow(now func() time.Time) {
+	o.now = now
+}
+
+func (o *HTTPClientOptions) clock() func() time.Time {
+	if o.now != nil {
+		return o.now
+	}
+
+	return time.Now
+}
+
+type tlsClientCertificateSource struct {
+	mu sync.Mutex
+	// current is the last successfully loaded certificate and is retained across reload failures.
+	current *tls.Certificate
+	// nextCheck bounds reload attempts to avoid reloading on every handshake.
+	nextCheck      time.Time
+	reloadInterval time.Duration
+	now            func() time.Time
+	loader         func() (*tls.Certificate, error)
+}
+
+type tlsClientCertificateReloader struct {
+	options *HTTPClientOptions
+	client  client.Client
+}
+
+func (r *tlsClientCertificateReloader) Load() (*tls.Certificate, error) {
+	// Reloads happen on future TLS handshakes, so reusing the setup context would make
+	// certificate refresh depend on whatever timeout/cancellation policy existed when
+	// the transport was constructed. A background context keeps reloads independent of
+	// that one-shot setup path. The tradeoff is that reloads are not currently time-bounded.
+	return r.options.loadTLSCertificate(context.Background(), r.client)
+}
+
+func newTLSClientCertificateSource(reloadInterval time.Duration, now func() time.Time, loader func() (*tls.Certificate, error)) (*tlsClientCertificateSource, error) {
+	certificate, err := loader()
+	if err != nil {
+		return nil, err
+	}
+
+	source := &tlsClientCertificateSource{
+		current:        certificate,
+		reloadInterval: reloadInterval,
+		now:            now,
+		loader:         loader,
+	}
+
+	if reloadInterval > 0 {
+		source.nextCheck = now().Add(reloadInterval)
+	}
+
+	return source, nil
+}
+
+func (s *tlsClientCertificateSource) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.reloadInterval <= 0 {
+		return s.current, nil
+	}
+
+	if s.now().Before(s.nextCheck) {
+		return s.current, nil
+	}
+
+	// Reload inline when the next handshake notices the check window has elapsed.
+	certificate, err := s.loader()
+	if err != nil {
+		if s.current != nil {
+			return s.current, nil
+		}
+
+		// The source preloads a certificate during construction, so this is a defensive
+		// fallback for completeness rather than an expected runtime path.
+		return nil, err
+	}
+
+	s.current = certificate
+	s.nextCheck = s.now().Add(s.reloadInterval)
+
+	return s.current, nil
 }
 
 func (o *HTTPClientOptions) loadTLSCertificate(ctx context.Context, cli client.Client) (*tls.Certificate, error) {
@@ -128,7 +223,7 @@ func (o *HTTPClientOptions) loadTLSCertificate(ctx context.Context, cli client.C
 
 	key, ok := secret.Data[corev1.TLSPrivateKeyKey]
 	if !ok {
-		return nil, fmt.Errorf("%w: certifcate missing tls.key", errors.ErrSecretFormatError)
+		return nil, fmt.Errorf("%w: certificate missing tls.key", errors.ErrSecretFormatError)
 	}
 
 	certificate, err := tls.X509KeyPair(cert, key)
@@ -146,14 +241,18 @@ func (o *HTTPClientOptions) ApplyTLSClientConfig(ctx context.Context, cli client
 		return nil
 	}
 
-	certificate, err := o.loadTLSCertificate(ctx, cli)
+	reloader := &tlsClientCertificateReloader{
+		options: o,
+		client:  cli,
+	}
+
+	// Reloads happen during future TLS handshakes, so they must not depend on the setup context.
+	source, err := newTLSClientCertificateSource(o.reloadInterval, o.clock(), reloader.Load)
 	if err != nil {
 		return err
 	}
 
-	config.Certificates = []tls.Certificate{
-		*certificate,
-	}
+	config.GetClientCertificate = source.GetClientCertificate
 
 	return nil
 }
