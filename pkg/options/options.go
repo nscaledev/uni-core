@@ -24,8 +24,10 @@ import (
 
 	"github.com/spf13/pflag"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/trace"
 
 	klog "k8s.io/klog/v2"
@@ -71,12 +73,12 @@ func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.Trac
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	if o.OTLPEndpoint != "" {
-		exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(o.OTLPEndpoint), otlptracehttp.WithInsecure())
+		traceExporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(o.OTLPEndpoint), otlptracehttp.WithInsecure())
 		if err != nil {
 			return err
 		}
 
-		opts = append(opts, trace.WithBatcher(exporter))
+		opts = append(opts, trace.WithBatcher(traceExporter))
 	}
 
 	switch {
@@ -89,6 +91,22 @@ func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.Trac
 	}
 
 	otel.SetTracerProvider(trace.NewTracerProvider(opts...))
+
+	meterOpts := []sdkmetric.Option{}
+
+	if o.OTLPEndpoint != "" {
+		metricExporter, err := otlpmetrichttp.New(ctx,
+			otlpmetrichttp.WithEndpoint(o.OTLPEndpoint),
+			otlpmetrichttp.WithInsecure(),
+		)
+		if err != nil {
+			return err
+		}
+
+		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)))
+	}
+
+	otel.SetMeterProvider(sdkmetric.NewMeterProvider(meterOpts...))
 
 	return nil
 }
