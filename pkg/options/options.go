@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -34,6 +35,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 // CoreOptions are things all controllers, message consumers and servers will need.
@@ -103,7 +105,11 @@ func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.Trac
 			return err
 		}
 
-		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter)))
+		bridge := prombridge.NewMetricProducer(prombridge.WithGatherer(ctrlmetrics.Registry))
+
+		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
+			sdkmetric.WithProducer(bridge),
+		)))
 	}
 
 	otel.SetMeterProvider(sdkmetric.NewMeterProvider(meterOpts...))
