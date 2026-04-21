@@ -57,6 +57,41 @@ func (t *myType) Equal(o *myType) bool {
 	return *t == *o
 }
 
+type overlayType struct {
+	id     string
+	status string
+}
+
+func (t *overlayType) Index() string {
+	return t.id
+}
+
+func (t *overlayType) Equal(o *overlayType) bool {
+	return *t == *o
+}
+
+type overlayGenerator struct {
+	lock  sync.Mutex
+	items []*overlayType
+}
+
+func (g *overlayGenerator) set(items ...*overlayType) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	g.items = items
+}
+
+func (g *overlayGenerator) refresh(_ context.Context) ([]*overlayType, error) {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	items := make([]*overlayType, len(g.items))
+	copy(items, g.items)
+
+	return items, nil
+}
+
 // staticGenerator provides a way to generate non changing data for the cache.
 type staticGenerator struct {
 	// size of the dataset.
@@ -399,6 +434,463 @@ func TestInvavalidationErrors(t *testing.T) {
 	time.Sleep(time.Second)
 
 	require.ErrorIs(t, c.Invalidate(), cache.ErrInvalid)
+}
+
+func TestInsertIfAbsentYieldsToNextRefreshWhenBackendOmitsKey(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "new", status: "creating"}))
+
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	require.NoError(t, c.Invalidate())
+
+	_, err := c.Get("new")
+	require.ErrorIs(t, err, cache.ErrNotFound)
+}
+
+func TestUpsertYieldsToNextRefreshWhenBackendChangesKey(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "image", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}))
+
+	generator.set(&overlayType{id: "image", status: "ready"})
+
+	require.NoError(t, c.Invalidate())
+
+	updated, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "ready", updated.Item.status)
+}
+
+func TestInsertIfAbsentDoesNothingWhenKeyAlreadyVisible(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "image", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	before, err := c.Get("image")
+	require.NoError(t, err)
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "image", status: "creating"}))
+
+	after, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "ready", after.Item.status)
+	require.True(t, after.Epoch.Valid(before.Epoch))
+}
+
+func TestInsertIfAbsentDoesNothingWhenLiveOverlayAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}))
+
+	before, err := c.Get("image")
+	require.NoError(t, err)
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "image", status: "creating"}))
+
+	after, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", after.Item.status)
+	require.True(t, after.Epoch.Valid(before.Epoch))
+}
+
+func TestUpsertInsertsWhenKeyMissing(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.Upsert(&overlayType{id: "missing", status: "delete_pending"}))
+
+	item, err := c.Get("missing")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", item.Item.status)
+}
+
+func TestInsertIfAbsentErrorsBeforeRun(t *testing.T) {
+	t.Parallel()
+
+	c := cache.NewRefreshAheadCache[overlayType](func(context.Context) ([]*overlayType, error) {
+		return nil, nil
+	}, &cache.RefreshAheadCacheOptions{})
+
+	require.ErrorIs(t, c.InsertIfAbsent(&overlayType{id: "image", status: "creating"}), cache.ErrInvalid)
+}
+
+func TestUpsertErrorsBeforeRun(t *testing.T) {
+	t.Parallel()
+
+	c := cache.NewRefreshAheadCache[overlayType](func(context.Context) ([]*overlayType, error) {
+		return nil, nil
+	}, &cache.RefreshAheadCacheOptions{})
+
+	require.ErrorIs(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}), cache.ErrInvalid)
+}
+
+func TestInsertIfAbsentYieldsToNextRefreshWhenBackendContainsKey(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "new", status: "creating"}))
+
+	generator.set(
+		&overlayType{id: "base", status: "ready"},
+		&overlayType{id: "new", status: "ready"},
+	)
+
+	require.NoError(t, c.Invalidate())
+
+	item, err := c.Get("new")
+	require.NoError(t, err)
+	require.Equal(t, "ready", item.Item.status)
+}
+
+func TestInsertIfAbsentYieldsToNextRefreshWhenBackendDropsKey(t *testing.T) {
+	t.Parallel()
+
+	generator := &overlayGenerator{}
+	generator.set(
+		&overlayType{id: "base", status: "ready"},
+		&overlayType{id: "new", status: "ready"},
+	)
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](generator.refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "new", status: "creating"}))
+
+	generator.set(&overlayType{id: "base", status: "ready"})
+
+	require.NoError(t, c.Invalidate())
+
+	_, err := c.Get("new")
+	require.ErrorIs(t, err, cache.ErrNotFound)
+}
+
+func TestConcurrentWritePreservesEpochAcrossStaleRefresh(t *testing.T) {
+	t.Parallel()
+
+	var (
+		lock    sync.Mutex
+		items   = []*overlayType{{id: "image", status: "ready"}}
+		started = make(chan struct{})
+		proceed = make(chan struct{})
+		block   atomic.Bool
+		once    sync.Once
+	)
+
+	refresh := func(_ context.Context) ([]*overlayType, error) {
+		lock.Lock()
+		current := make([]*overlayType, len(items))
+		copy(current, items)
+		lock.Unlock()
+
+		if block.Load() {
+			// Capture the stale backend snapshot first, then block. The concurrent
+			// Upsert that follows should therefore outrank this refresh and remain
+			// visible until a later refresh starts.
+			once.Do(func() { close(started) })
+
+			<-proceed
+		}
+
+		return current, nil
+	}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	block.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.Invalidate()
+	}()
+
+	<-started
+
+	require.NoError(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}))
+
+	writeSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", writeSnapshot.Item.status)
+
+	close(proceed)
+	require.NoError(t, <-done)
+
+	finalSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", finalSnapshot.Item.status)
+	require.True(t, finalSnapshot.Epoch.Valid(writeSnapshot.Epoch))
+
+	require.NoError(t, c.Invalidate())
+
+	refreshedSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "ready", refreshedSnapshot.Item.status)
+	require.False(t, refreshedSnapshot.Epoch.Valid(finalSnapshot.Epoch))
+}
+
+func TestConcurrentInsertIfAbsentPreservesEpochAcrossStaleRefresh(t *testing.T) {
+	t.Parallel()
+
+	var (
+		lock    sync.Mutex
+		items   = []*overlayType{{id: "base", status: "ready"}}
+		started = make(chan struct{})
+		proceed = make(chan struct{})
+		block   atomic.Bool
+		once    sync.Once
+	)
+
+	refresh := func(_ context.Context) ([]*overlayType, error) {
+		lock.Lock()
+		current := make([]*overlayType, len(items))
+		copy(current, items)
+		lock.Unlock()
+
+		if block.Load() {
+			once.Do(func() { close(started) })
+
+			<-proceed
+		}
+
+		return current, nil
+	}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	block.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.Invalidate()
+	}()
+
+	<-started
+
+	require.NoError(t, c.InsertIfAbsent(&overlayType{id: "image", status: "creating"}))
+
+	writeSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "creating", writeSnapshot.Item.status)
+
+	close(proceed)
+	require.NoError(t, <-done)
+
+	finalSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "creating", finalSnapshot.Item.status)
+	require.True(t, finalSnapshot.Epoch.Valid(writeSnapshot.Epoch))
+
+	lock.Lock()
+	items = []*overlayType{{id: "base", status: "ready"}, {id: "image", status: "ready"}}
+	lock.Unlock()
+
+	require.NoError(t, c.Invalidate())
+
+	refreshedSnapshot, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "ready", refreshedSnapshot.Item.status)
+	require.False(t, refreshedSnapshot.Epoch.Valid(finalSnapshot.Epoch))
+}
+
+func TestRefreshWithSurvivingOverlayBumpsEpochWhenVisibleViewChanges(t *testing.T) {
+	t.Parallel()
+
+	var (
+		lock    sync.Mutex
+		items   = []*overlayType{{id: "image", status: "ready"}, {id: "other", status: "ready"}}
+		started = make(chan struct{})
+		proceed = make(chan struct{})
+		block   atomic.Bool
+		once    sync.Once
+	)
+
+	refresh := func(_ context.Context) ([]*overlayType, error) {
+		if block.Load() {
+			once.Do(func() { close(started) })
+
+			<-proceed
+		}
+
+		lock.Lock()
+		current := make([]*overlayType, len(items))
+		copy(current, items)
+		lock.Unlock()
+
+		return current, nil
+	}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	block.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.Invalidate()
+	}()
+
+	<-started
+
+	lock.Lock()
+	items = []*overlayType{{id: "image", status: "ready"}, {id: "other", status: "updated"}}
+	lock.Unlock()
+
+	require.NoError(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}))
+
+	before, err := c.List()
+	require.NoError(t, err)
+
+	close(proceed)
+	require.NoError(t, <-done)
+
+	after, err := c.List()
+	require.NoError(t, err)
+	require.False(t, after.Epoch.Valid(before.Epoch))
+
+	image, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", image.Item.status)
+
+	other, err := c.Get("other")
+	require.NoError(t, err)
+	require.Equal(t, "updated", other.Item.status)
+}
+
+func TestRefreshWithSurvivingOverlayKeepsEpochWhenVisibleViewIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	var (
+		lock    sync.Mutex
+		items   = []*overlayType{{id: "image", status: "ready"}}
+		started = make(chan struct{})
+		proceed = make(chan struct{})
+		block   atomic.Bool
+		once    sync.Once
+	)
+
+	refresh := func(_ context.Context) ([]*overlayType, error) {
+		lock.Lock()
+		current := make([]*overlayType, len(items))
+		copy(current, items)
+		lock.Unlock()
+
+		if block.Load() {
+			once.Do(func() { close(started) })
+
+			<-proceed
+		}
+
+		return current, nil
+	}
+
+	options := &cache.RefreshAheadCacheOptions{
+		RefreshPeriod: time.Minute,
+	}
+
+	c := cache.NewRefreshAheadCache[overlayType](refresh, options)
+	require.NoError(t, c.Run(t.Context()))
+
+	block.Store(true)
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- c.Invalidate()
+	}()
+
+	<-started
+
+	require.NoError(t, c.Upsert(&overlayType{id: "image", status: "delete_pending"}))
+
+	before, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", before.Item.status)
+
+	close(proceed)
+	require.NoError(t, <-done)
+
+	after, err := c.Get("image")
+	require.NoError(t, err)
+	require.Equal(t, "delete_pending", after.Item.status)
+	require.True(t, after.Epoch.Valid(before.Epoch))
 }
 
 // BenchmarkRefreshAheadCacheGet tests single item retrieival performance.
