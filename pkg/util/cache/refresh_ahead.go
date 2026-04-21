@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -43,12 +44,12 @@ var (
 
 // Epoch represents a revision of the cache data.
 type Epoch struct {
-	epoch time.Time
+	epoch uint64
 }
 
 // Valid checks if a previous epoch is still valid against the current one.
 func (e Epoch) Valid(previous Epoch) bool {
-	return e.epoch.Equal(previous.epoch)
+	return e.epoch == previous.epoch
 }
 
 // Cacheable defines a cacheable type.
@@ -202,6 +203,8 @@ type invalidationRequest struct {
 type RefreshAheadCache[T any, TP CacheablePointer[T]] struct {
 	// options provide cache configuration.
 	options *RefreshAheadCacheOptions
+	// nextEpoch allocates strictly increasing epochs local to this cache instance.
+	nextEpoch atomic.Uint64
 	// epoch that the cache is valid for.
 	epoch Epoch
 	// refresh is used to refresh the entire cache in the background.
@@ -227,6 +230,13 @@ func NewRefreshAheadCache[T any, TP CacheablePointer[T]](refresh RefreshFunc[T, 
 	return &RefreshAheadCache[T, TP]{
 		refresh: refresh,
 		options: options,
+	}
+}
+
+// newEpoch allocates a new epoch local to this cache instance.
+func (c *RefreshAheadCache[T, TP]) newEpoch() Epoch {
+	return Epoch{
+		epoch: c.nextEpoch.Add(1),
 	}
 }
 
@@ -426,7 +436,7 @@ func (c *RefreshAheadCache[T, TP]) doRefresh(ctx context.Context) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.epoch.epoch = time.Now()
+	c.epoch = c.newEpoch()
 	c.cache = cache
 
 	return nil
