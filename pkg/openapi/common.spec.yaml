@@ -43,6 +43,11 @@ components:
         trace_id:
           description: Unique trace identifier for the request.
           type: string
+    resourceId:
+      description: |-
+        A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+      type: string
+      format: uuid
     kubernetesLabelValue:
       description: |-
         A valid Kubernetes label value, typically used for resource names that can be
@@ -116,8 +121,7 @@ components:
         - creationTime
         properties:
           id:
-            description: The unique resource ID.
-            type: string
+            $ref: '#/components/schemas/resourceId'
           creationTime:
             description: The time the resource was created.
             type: string
@@ -176,8 +180,7 @@ components:
         - organizationId
         properties:
           organizationId:
-            description: The organization identifier the resource belongs to.
-            type: string
+            $ref: '#/components/schemas/resourceId'
     projectScopedResourceReadMetadata:
       description: Metadata required by project scoped resource reads.
       allOf:
@@ -187,8 +190,7 @@ components:
         - projectId
         properties:
           projectId:
-            description: The project identifier the resource belongs to.
-            type: string
+            $ref: '#/components/schemas/resourceId'
     resourceWriteMetadata:
       $ref: '#/components/schemas/resourceMetadata'
     authorizationServerList:

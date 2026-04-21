@@ -5,6 +5,8 @@ package openapi
 
 import (
 	"time"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for BearerMethod.
@@ -113,8 +115,8 @@ type OrganizationScopedResourceReadMetadata struct {
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
 
-	// Id The unique resource ID.
-	Id string `json:"id"`
+	// Id A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	Id ResourceId `json:"id"`
 
 	// ModifiedBy The user who updated the resource.
 	ModifiedBy *string `json:"modifiedBy,omitempty"`
@@ -126,8 +128,8 @@ type OrganizationScopedResourceReadMetadata struct {
 	// indexed in the database.
 	Name KubernetesLabelValue `json:"name"`
 
-	// OrganizationId The organization identifier the resource belongs to.
-	OrganizationId string `json:"organizationId"`
+	// OrganizationId A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	OrganizationId ResourceId `json:"organizationId"`
 
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
@@ -153,8 +155,8 @@ type ProjectScopedResourceReadMetadata struct {
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
 
-	// Id The unique resource ID.
-	Id string `json:"id"`
+	// Id A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	Id ResourceId `json:"id"`
 
 	// ModifiedBy The user who updated the resource.
 	ModifiedBy *string `json:"modifiedBy,omitempty"`
@@ -166,11 +168,11 @@ type ProjectScopedResourceReadMetadata struct {
 	// indexed in the database.
 	Name KubernetesLabelValue `json:"name"`
 
-	// OrganizationId The organization identifier the resource belongs to.
-	OrganizationId string `json:"organizationId"`
+	// OrganizationId A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	OrganizationId ResourceId `json:"organizationId"`
 
-	// ProjectId The project identifier the resource belongs to.
-	ProjectId string `json:"projectId"`
+	// ProjectId A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	ProjectId ResourceId `json:"projectId"`
 
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
@@ -181,6 +183,9 @@ type ProjectScopedResourceReadMetadata struct {
 
 // ResourceHealthStatus The health state of a resource.
 type ResourceHealthStatus string
+
+// ResourceId A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+type ResourceId = openapi_types.UUID
 
 // ResourceMetadata Metadata required for all API resource reads and writes.
 type ResourceMetadata struct {
@@ -215,8 +220,8 @@ type ResourceReadMetadata struct {
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
 
-	// Id The unique resource ID.
-	Id string `json:"id"`
+	// Id A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	Id ResourceId `json:"id"`
 
 	// ModifiedBy The user who updated the resource.
 	ModifiedBy *string `json:"modifiedBy,omitempty"`
@@ -256,8 +261,8 @@ type StaticResourceMetadata struct {
 	// Description The resource description, this optionally augments the name with more context.
 	Description *string `json:"description,omitempty"`
 
-	// Id The unique resource ID.
-	Id string `json:"id"`
+	// Id A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+	Id ResourceId `json:"id"`
 
 	// ModifiedBy The user who updated the resource.
 	ModifiedBy *string `json:"modifiedBy,omitempty"`
