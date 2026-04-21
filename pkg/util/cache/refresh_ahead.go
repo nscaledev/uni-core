@@ -407,6 +407,8 @@ func (c *RefreshAheadCache[T, TP]) doRefresh(ctx context.Context) error {
 		}
 	}()
 
+	refreshEpoch := c.newEpoch()
+
 	// Collect the refreshed data.
 	data, err := c.refresh(ctx)
 	if err != nil {
@@ -436,7 +438,7 @@ func (c *RefreshAheadCache[T, TP]) doRefresh(ctx context.Context) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.epoch = c.newEpoch()
+	c.epoch = refreshEpoch
 	c.cache = cache
 
 	return nil
