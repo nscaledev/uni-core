@@ -47,6 +47,11 @@ type Epoch struct {
 	epoch uint64
 }
 
+// after checks whether e represents a later revision than other.
+func (e Epoch) after(other Epoch) bool {
+	return e.epoch > other.epoch
+}
+
 // Valid checks if a previous epoch is still valid against the current one.
 func (e Epoch) Valid(previous Epoch) bool {
 	return e.epoch == previous.epoch
@@ -85,7 +90,7 @@ type ListSnapshot[T any] struct {
 	Epoch Epoch
 	// Items are the individual cache items.  No ordering constraints are placed
 	// on the snapshot items as this is likely to be more efficient downstream
-	// after any potential filtering oprtations.
+	// after any potential filtering operations.
 	Items []*T
 }
 
@@ -137,6 +142,16 @@ func (m cacheMap[T, TP]) Equal(o cacheMap[T, TP]) bool {
 	return true
 }
 
+// overlayEntry records a local mutation that must remain visible until a later
+// refresh that started after the mutation has completed.
+type overlayEntry[T any, TP CacheablePointer[T]] struct {
+	item  TP
+	epoch Epoch
+}
+
+// overlayMap records pending local mutations by cache key.
+type overlayMap[T any, TP CacheablePointer[T]] map[string]overlayEntry[T, TP]
+
 // invalidationRequest allows a client to synchronously trigger
 // a cache invalidation.
 type invalidationRequest struct {
@@ -165,9 +180,37 @@ type invalidationRequest struct {
 // example on creation or update to avoid having to perform a potentially
 // costly rebuild.
 //
+// Local writes are applied through a write-through overlay. A local mutation
+// is immediately visible in the effective cache view. If a refresh is already
+// in flight when that mutation happens, the overlay survives that refresh so
+// the stale backend snapshot cannot erase the new value.
+//
+// Correctness depends on two usage constraints:
+//   - This is a single-instance cache. If callers write through one process and
+//     read through another cache instance, read-your-writes is not guaranteed.
+//   - InsertIfAbsent and Upsert must only be called after the corresponding
+//     backend write has synchronously and atomically committed. A refresh that
+//     starts after such a write is assumed to observe that committed state.
+//
+// Once a later refresh starts after the mutation, the backend snapshot is
+// treated as authoritative again and the overlay entry is discarded. In other
+// words, the overlay only bridges writes that land during an in-flight
+// refresh; it is not a long-lived reconciliation layer.
+//
+// This model has primarily been designed and tested for singleton-style writes,
+// for example creates keyed by a unique primary key where only one object can
+// exist for that key.
+//
+// For a single cache instance, concurrent calls to InsertIfAbsent and Upsert
+// are serialized by the cache lock. However, if multiple writers concurrently
+// commit different values for the same key in the backend, the cache does not
+// try to apply any extra heuristic to pick a local winner beyond that
+// serialization order. In that case the visible value will still converge back
+// to the backend on the next authoritative refresh.
+//
 // # Read Performance
 //
-// Bacground synchronization ensures every client read will perform equally
+// Background synchronization ensures every client read will perform equally
 // well.  To facilitate efficient lookups of individual resources in the
 // cache each resource will be indexed via some form of hashing function
 // that uniquely identfies that resource.
@@ -209,8 +252,12 @@ type RefreshAheadCache[T any, TP CacheablePointer[T]] struct {
 	epoch Epoch
 	// refresh is used to refresh the entire cache in the background.
 	refresh RefreshFunc[T, TP]
-	// cache records the actual data.
+	// cache records the effective user-visible data after applying any pending
+	// overlay mutations.
 	cache cacheMap[T, TP]
+	// overlay records local mutations that must survive any refresh already in
+	// flight when they were written.
+	overlay overlayMap[T, TP]
 	// lock controls concurrent accesses.
 	lock sync.RWMutex
 	// invalidations is a channel that allows a client to synchronously
@@ -238,6 +285,125 @@ func (c *RefreshAheadCache[T, TP]) newEpoch() Epoch {
 	return Epoch{
 		epoch: c.nextEpoch.Add(1),
 	}
+}
+
+// InsertIfAbsent inserts item into the effective cache view when the key is not
+// already present.
+//
+// Callers must only invoke this after the corresponding backend insert has
+// synchronously committed. This path is primarily intended for singleton-style
+// inserts where a key can only be created once. The inserted value remains
+// authoritative until a later refresh that started after the insert replaces
+// it with backend state.
+func (c *RefreshAheadCache[T, TP]) InsertIfAbsent(item TP) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.cache == nil {
+		return ErrInvalid
+	}
+
+	index := item.Index()
+
+	if _, ok := c.cache[index]; ok {
+		// c.cache always reflects live overlay writes, so this covers both
+		// backend-populated entries and existing overlay entries.
+		return nil
+	}
+
+	if c.overlay == nil {
+		c.overlay = make(overlayMap[T, TP])
+	}
+
+	writeEpoch := c.newEpoch()
+
+	c.overlay[index] = overlayEntry[T, TP]{
+		item:  item,
+		epoch: writeEpoch,
+	}
+	c.cache[index] = item
+	c.epoch = writeEpoch
+
+	return nil
+}
+
+// Upsert writes item into the effective cache view whether or not the key is
+// already present.
+//
+// Callers must only invoke this after the corresponding backend write has
+// synchronously committed. If multiple writers race to upsert different values
+// for the same key, this cache does not define an additional winner-selection
+// policy beyond local serialization; the next authoritative refresh remains the
+// point where the cache is guaranteed to converge back to backend state. The
+// written value remains authoritative until a later refresh that started after
+// the write replaces it with backend state.
+func (c *RefreshAheadCache[T, TP]) Upsert(item TP) error {
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	if c.cache == nil {
+		return ErrInvalid
+	}
+
+	if c.overlay == nil {
+		c.overlay = make(overlayMap[T, TP])
+	}
+
+	index := item.Index()
+	writeEpoch := c.newEpoch()
+
+	c.overlay[index] = overlayEntry[T, TP]{
+		item:  item,
+		epoch: writeEpoch,
+	}
+	c.cache[index] = item
+	c.epoch = writeEpoch
+
+	return nil
+}
+
+// mergeAndPruneOverlayLocked rebuilds the effective user-visible cache view
+// from the freshly refreshed backend snapshot and any overlay entries that
+// landed after this refresh started. Older overlay entries are discarded and
+// the backend snapshot becomes authoritative for those keys.
+func (c *RefreshAheadCache[T, TP]) mergeAndPruneOverlayLocked(cache cacheMap[T, TP], refreshEpoch Epoch) cacheMap[T, TP] {
+	if len(c.overlay) == 0 {
+		return cache
+	}
+
+	// cache is the newly refreshed backend snapshot. Readers do not consume that
+	// snapshot directly: they consume the effective view after any still-pending
+	// local mutations have been reapplied.
+	//
+	// Rebuilding a fresh effective map here is deliberate. c.cache already
+	// includes prior overlay writes, so mutating it in place would risk carrying
+	// stale pre-refresh state forward. Starting from the fresh backend result and
+	// then reapplying only the overlay entries backed by newer mutations keeps
+	// the visible cache state deterministic.
+	effective := make(cacheMap[T, TP], len(cache)+len(c.overlay))
+	overlay := make(overlayMap[T, TP], len(c.overlay))
+
+	maps.Copy(effective, cache)
+
+	for index, entry := range c.overlay {
+		// Writes that landed while this refresh was already in flight must
+		// survive it. Older overlay entries yield to the refreshed backend
+		// snapshot on this refresh.
+		if !entry.epoch.after(refreshEpoch) {
+			continue
+		}
+
+		overlay[index] = entry
+		effective[index] = entry.item
+	}
+
+	if len(overlay) == 0 {
+		c.overlay = nil
+	} else {
+		c.overlay = overlay
+	}
+
+	return effective
 }
 
 // Run performs a synchronous refresh to pre load cache data and
@@ -407,6 +573,9 @@ func (c *RefreshAheadCache[T, TP]) doRefresh(ctx context.Context) error {
 		}
 	}()
 
+	// refreshEpoch must be allocated before the backend fetch starts. That epoch
+	// marks the refresh start boundary, allowing later local writes to receive a
+	// strictly newer epoch and remain authoritative over this refresh result.
 	refreshEpoch := c.newEpoch()
 
 	// Collect the refreshed data.
@@ -427,19 +596,38 @@ func (c *RefreshAheadCache[T, TP]) doRefresh(ctx context.Context) error {
 		cache[index] = data[i]
 	}
 
-	// Has anything actually changed?
-	// NOTE: this is performed unlocked as this function is the only thing
-	// that can modify the cache.
-	if cache.Equal(c.cache) {
-		return nil
-	}
-
-	// Write the new data.
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.epoch = refreshEpoch
-	c.cache = cache
+	effective := c.mergeAndPruneOverlayLocked(cache, refreshEpoch)
+
+	if effective.Equal(c.cache) {
+		// Epochs represent the identity of the visible cache snapshot, not the
+		// provenance of how it was assembled. If a refresh catches up to the
+		// current effective view exactly, then callers are still looking at the
+		// same snapshot and should be allowed to retain any memoized work keyed
+		// off the existing epoch. We still replace c.cache here because overlay
+		// pruning may have rebuilt the effective map even though the visible
+		// snapshot identity is unchanged.
+		c.cache = effective
+
+		return nil
+	}
+
+	// We only reach this branch when the visible effective view has changed.
+	// If it had not changed, the equality check above would have returned early
+	// and preserved the existing epoch. At this point a new visible snapshot
+	// needs a new epoch. If no overlay survives, the visible snapshot is exactly
+	// the refresh result so the refresh-start epoch is the right identity. If
+	// overlay still survives, the visible snapshot is a newly assembled merged
+	// view and must receive its own epoch.
+	if len(c.overlay) == 0 {
+		c.epoch = refreshEpoch
+	} else {
+		c.epoch = c.newEpoch()
+	}
+
+	c.cache = effective
 
 	return nil
 }
