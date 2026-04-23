@@ -30,8 +30,8 @@ import (
 // If available, then it can be used by a child, and it returns nil, otherwise
 // returns ErrYield.
 func ResourceReady(ctx context.Context, resource corev1.ManagableResourceInterface) error {
-	status, err := resource.StatusConditionRead(corev1.ConditionAvailable)
-	if err != nil || status.Reason != corev1.ConditionReasonProvisioned {
+	condition, err := corev1.GetTypedCondition[corev1.ProvisioningConditionReason](resource, corev1.ConditionAvailable)
+	if err != nil || condition.Reason != corev1.ConditionReasonProvisioned {
 		log.FromContext(ctx).Info("resource dependency is not ready")
 
 		return provisioners.ErrYield

@@ -43,7 +43,6 @@ const (
 	ResourceProvisioningStatusPending        ResourceProvisioningStatus = "pending"
 	ResourceProvisioningStatusProvisioned    ResourceProvisioningStatus = "provisioned"
 	ResourceProvisioningStatusProvisioning   ResourceProvisioningStatus = "provisioning"
-	ResourceProvisioningStatusUnknown        ResourceProvisioningStatus = "unknown"
 )
 
 // AuthorizationServerList List of authorization servers that can grant access to the resource.

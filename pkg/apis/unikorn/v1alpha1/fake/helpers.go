@@ -37,6 +37,6 @@ func (r *ManagedResource) StatusConditionRead(t unikornv1.ConditionType) (*uniko
 	return unikornv1.GetCondition(r.Status.Conditions, t)
 }
 
-func (r *ManagedResource) StatusConditionWrite(t unikornv1.ConditionType, status corev1.ConditionStatus, reason unikornv1.ConditionReason, message string) {
+func (r *ManagedResource) StatusConditionWrite(t unikornv1.ConditionType, status corev1.ConditionStatus, reason string, message string) {
 	unikornv1.UpdateCondition(&r.Status.Conditions, t, status, reason, message)
 }
