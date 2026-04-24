@@ -35,6 +35,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const (
+	testResourceReference  = "cat"
+	testReferenceNamespace = "donkey"
+)
+
 // TestReferenceGeneration tests that given a client, and an object we generate a
 // unique resource reference comprised of the fully qualified resource, group and
 // resource name (ID in our case).
@@ -70,7 +75,7 @@ func TestReferenceGeneration(t *testing.T) {
 func TestRererenceRead(t *testing.T) {
 	t.Parallel()
 
-	reference1 := "cat"
+	reference1 := testResourceReference
 	reference2 := "dag"
 
 	object := &networkingv1.Ingress{
@@ -102,11 +107,11 @@ func TestRererenceRead(t *testing.T) {
 func TestReferenceClear(t *testing.T) {
 	t.Parallel()
 
-	reference := "cat"
+	reference := testResourceReference
 	label := "animal"
 	labelValue1 := "giraffe"
 	labelValue2 := "elephant"
-	namespace1 := "donkey"
+	namespace1 := testReferenceNamespace
 	namespace2 := "dragon"
 
 	objects := &networkingv1.IngressList{
@@ -202,4 +207,52 @@ func TestReferenceClear(t *testing.T) {
 	require.Len(t, object.Finalizers, 2)
 	require.Contains(t, object.Finalizers, constants.Finalizer)
 	require.Contains(t, object.Finalizers, reference)
+}
+
+// TestReferenceRemoveNotFound verifies keyed removal behaves like idempotent cleanup
+// when the referenced resource has already been deleted.
+func TestReferenceRemoveNotFound(t *testing.T) {
+	t.Parallel()
+
+	reference := testResourceReference
+	namespace := testReferenceNamespace
+	name := "foo"
+
+	cli := fake.NewClientBuilder().Build()
+
+	err := manager.RemoveResourceReference(t.Context(), cli, &networkingv1.Ingress{}, client.ObjectKey{
+		Namespace: namespace,
+		Name:      name,
+	}, reference)
+	require.NoError(t, err)
+}
+
+// TestReferenceRemoveMissingReference verifies keyed removal is a no-op when the
+// resource exists but does not carry the selected reference.
+func TestReferenceRemoveMissingReference(t *testing.T) {
+	t.Parallel()
+
+	reference := testResourceReference
+	namespace := testReferenceNamespace
+	name := "foo"
+
+	object := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+		},
+	}
+
+	cli := fake.NewClientBuilder().WithObjects(object).Build()
+
+	require.NoError(t, manager.RemoveResourceReference(t.Context(), cli, &networkingv1.Ingress{}, client.ObjectKeyFromObject(object), reference))
+
+	result := &networkingv1.Ingress{}
+
+	require.NoError(t, cli.Get(t.Context(), client.ObjectKeyFromObject(object), result))
+	require.Len(t, result.Finalizers, 1)
+	require.Contains(t, result.Finalizers, constants.Finalizer)
 }
