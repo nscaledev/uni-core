@@ -186,6 +186,10 @@ func RemoveResourceReference(ctx context.Context, cli client.Client, resource cl
 	log := log.FromContext(ctx)
 
 	if err := cli.Get(ctx, key, resource); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+
 		return err
 	}
 
@@ -198,6 +202,10 @@ func RemoveResourceReference(ctx context.Context, cli client.Client, resource cl
 	}
 
 	if err := cli.Update(ctx, resource); err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil
+		}
+
 		if kerrors.IsConflict(err) {
 			return provisioners.ErrYield
 		}
