@@ -10,6 +10,9 @@ This is the shared core library, it contains:
 * generic manager frameworks
 * generic server frameworks
 
+For the internal package knowledge graph and reading order, see
+[pkg/README.md](./pkg/README.md).
+
 ## Core Architecture
 
 Provisioners use continuous deployment (CD) as the foundation of cluster provisioning.
@@ -51,12 +54,16 @@ The general algorithm is:
 * If the deletion timestamp is set, it is being deleted
   * Run the deprovisioner
   * Update the custom resource status conditions
-  * If an error occurred, re-queue the reconcile, otherwise remove the finalizer to allow deletion and end reconciliation
+  * If deprovisioning yields, re-queue on the fixed yield timeout
+  * If an unexpected error occurs, return a hard reconcile error
+  * Otherwise remove the finalizer to allow deletion and end reconciliation
 * Otherwise we reconcile, either creating or updating resources
   * Add the finalizer to the custom resource if not already set to allow controlled deletion
   * Run the provisioner
   * Update the custom resource status conditions
-  * If an error occurred, re-queue the reconcile, otherwise end reconciliation
+  * If progress cannot continue, re-queue on the fixed yield timeout
+  * If an unexpected error occurs, update status and still re-queue on the fixed timeout rather than returning a raw reconcile error
+  * Otherwise end reconciliation
 
 Like the core controller logic, the reconciler handles status conditions, regardless of the custom resource type, in a generic manner to provide consistency.
 
@@ -66,12 +73,11 @@ The context contains a number of important values that can be propagated anywher
 These are:
 
 * Logger, provided by Controller Runtime
-* A Kubernetes client scoped to the current provisioner system
+* A Kubernetes client for the host or service cluster
+  * This is used primarily by the application provisioner to create applications for the CD driver and for other local control-plane operations
+* An active cluster scope describing where descendant provisioners should operate
   * By default this is the host system
-  * This is used primarily by the application provisioner to create applications for the CD driver
-* A cluster scoped to the current cluster that is being provisioned
-  * By default this is the host system
-  * When you invoke a provisioner in a remote cluster, this will be updated to that cluster
+  * When you invoke a provisioner in a remote cluster, this scope is rewritten to that cluster
   * This is used primarily to get secrets created in that cluster by an application e.g. credentials that need to be exposed to higher layers, typically Kubernetes configurations for nested remote clusters
   * It can also be used for hacks where the provisioner needs direct access to resources on the system, but this is discouraged
 * A CD driver that provides a generic interface to CD backends
@@ -115,13 +121,13 @@ These provide the following functionality:
   * Deprovisioning will occur in reverse order
 * Concurrent provisioner
   * Unordered provisioning where child provisioners can or must be provisioned independently of one another
-  * It will return nil if all succeed, or the first error that is encountered
+  * All children are launched in the same reconcile pass and it returns the first error preserved by the group after they have all returned
 * Conditional provisioner
   * Allows provisioners to be run if a predicate is true
   * Deprovisions if the predicate is false in order to facilitate removal of a single provisioner
 * Resource provisioner
   * For those times where you absolutely need to create a resource by hand, as opposed to via Helm
-  * Use of this should be restricted
+  * This is legacy hackery and should not be the pattern for new code
 
 As alluded to generic provisioners operate on other provisioners, thus can be composed into really complex logic that cannot be done with CD tools.
 
@@ -321,4 +327,3 @@ make pact-broker-upgrade-uat
 ```
 
 The deployment includes PostgreSQL for storage, ingress with TLS certificates, and automatic database cleanup configured per environment.
-
