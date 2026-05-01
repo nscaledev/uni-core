@@ -1,5 +1,6 @@
 /bin
 /sboms
+/.codex
 /charts/core/Chart.lock
 /charts/core/charts
 /charts/pact-broker/charts
