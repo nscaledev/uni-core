@@ -11,5 +11,5 @@ icon: https://assets.unikorn-cloud.org/images/logos/dark-on-light/icon.svg
 
 dependencies:
 - name: unikorn-common
-  version: 0.1.16
+  version: 0.1.17
   repository: https://nscaledev.github.io/uni-helm-common
