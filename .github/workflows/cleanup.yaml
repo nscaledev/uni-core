@@ -1,0 +1,61 @@
+name: Cleanup Nightlies
+on:
+  schedule:
+  - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      ttl_days:
+        description: 'Delete nightly builds older than this many days'
+        required: false
+        default: '7'
+        type: string
+permissions:
+  contents: write
+  packages: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    - name: Delete expired nightlies
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TTL_DAYS: ${{ inputs.ttl_days || '7' }}
+      run: |
+        OWNER=$(cut -d'/' -f1 <<< "$GITHUB_REPOSITORY")
+        REPO=$(cut -d'/' -f2 <<< "$GITHUB_REPOSITORY")
+        CHART_NAME=$(sed 's/^uni-//' <<< "$REPO")
+        CHART_PACKAGE_NAME=$(grep '^name:' "charts/${CHART_NAME}/Chart.yaml" | awk '{print $2}')
+        CHART_PKG="charts-nightly%2F${CHART_PACKAGE_NAME}"
+
+        CUTOFF=$(date -u -d "${TTL_DAYS} days ago" +%Y%m%d%H%M%S)
+        echo "Cutoff: ${CUTOFF} (TTL: ${TTL_DAYS} days)"
+
+        while read -r TAG; do
+          TIMESTAMP=$(sed 's/v0\.0\.0-\([0-9]\{14\}\)-.*/\1/' <<< "$TAG")
+          [[ "$TIMESTAMP" =~ ^[0-9]{14}$ ]] || continue
+          [[ "$TIMESTAMP" < "$CUTOFF" ]] || continue
+
+          CHART_VERSION="${TAG#v}"
+          echo "Expiring ${TAG}"
+
+          # Delete OCI chart package version
+          ID=$(gh api "/orgs/${OWNER}/packages/container/${CHART_PKG}/versions" --paginate \
+            --jq ".[] | select((.metadata.container.tags // [])[] == \"${CHART_VERSION}\") | .id" \
+            2>/dev/null | head -1)
+          if [[ -n "$ID" ]]; then
+            gh api -X DELETE "/orgs/${OWNER}/packages/container/${CHART_PKG}/versions/${ID}" \
+              && echo "  ✓ chart" || echo "  ✗ chart (will retry next run)"
+          fi
+
+          # Delete git tag last — if artifact deletion failed above, the tag
+          # remains and the next run will retry it before attempting this again.
+          gh api -X DELETE "/repos/${OWNER}/${REPO}/git/refs/tags/${TAG}" \
+            && echo "  ✓ git tag" || echo "  ✗ git tag"
+
+        done < <(gh api "/repos/${OWNER}/${REPO}/git/refs/tags" --paginate \
+          --jq '.[].ref | select(test("refs/tags/v0\\.0\\.0-"))' \
+          | sed 's|refs/tags/||')
