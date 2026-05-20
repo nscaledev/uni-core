@@ -25,6 +25,7 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/google/uuid"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
@@ -104,12 +105,17 @@ func convertHealthCondition(in any) openapi.ResourceHealthStatus {
 }
 
 // ResourceReadMetadata extracts generic metadata from a resource for GET APIs.
-func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.ResourceReadMetadata {
+func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) (openapi.ResourceReadMetadata, error) {
+	id, err := uuid.Parse(in.GetName())
+	if err != nil {
+		return openapi.ResourceReadMetadata{}, fmt.Errorf("resource has invalid ID %q: %w", in.GetName(), err)
+	}
+
 	labels := in.GetLabels()
 	annotations := in.GetAnnotations()
 
 	out := openapi.ResourceReadMetadata{
-		Id:                 in.GetName(),
+		Id:                 id,
 		Name:               labels[constants.NameLabel],
 		CreationTime:       in.GetCreationTimestamp().Time,
 		ProvisioningStatus: convertStatusCondition(in),
@@ -143,48 +149,69 @@ func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.Reso
 		out.Tags = ptr.To(ConvertTags(tags))
 	}
 
-	return out
+	return out, nil
 }
 
 // OrganizationScopedResourceReadMetadata extracts organization scoped metdata from a resource
 // for GET APIS.
 //
 //nolint:errchkjson
-func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.OrganizationScopedResourceReadMetadata {
-	temp := ResourceReadMetadata(in, tags)
+func OrganizationScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) (openapi.OrganizationScopedResourceReadMetadata, error) {
+	temp, err := ResourceReadMetadata(in, tags)
+	if err != nil {
+		return openapi.OrganizationScopedResourceReadMetadata{}, err
+	}
 
 	tempJSON, _ := json.Marshal(temp)
 
 	labels := in.GetLabels()
 
+	organizationID, err := uuid.Parse(labels[constants.OrganizationLabel])
+	if err != nil {
+		return openapi.OrganizationScopedResourceReadMetadata{}, fmt.Errorf("resource has invalid organization ID %q: %w", labels[constants.OrganizationLabel], err)
+	}
+
 	out := openapi.OrganizationScopedResourceReadMetadata{
-		OrganizationId: labels[constants.OrganizationLabel],
+		OrganizationId: organizationID,
 	}
 
 	_ = json.Unmarshal(tempJSON, &out)
 
-	return out
+	return out, nil
 }
 
 // ProjectScopedResourceReadMetadata extracts project scoped metdata from a resource for
 // GET APIs.
 //
 //nolint:errchkjson
-func ProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.ProjectScopedResourceReadMetadata {
-	temp := ResourceReadMetadata(in, tags)
+func ProjectScopedResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) (openapi.ProjectScopedResourceReadMetadata, error) {
+	temp, err := ResourceReadMetadata(in, tags)
+	if err != nil {
+		return openapi.ProjectScopedResourceReadMetadata{}, err
+	}
 
 	tempJSON, _ := json.Marshal(temp)
 
 	labels := in.GetLabels()
 
+	organizationID, err := uuid.Parse(labels[constants.OrganizationLabel])
+	if err != nil {
+		return openapi.ProjectScopedResourceReadMetadata{}, fmt.Errorf("resource has invalid organization ID %q: %w", labels[constants.OrganizationLabel], err)
+	}
+
+	projectID, err := uuid.Parse(labels[constants.ProjectLabel])
+	if err != nil {
+		return openapi.ProjectScopedResourceReadMetadata{}, fmt.Errorf("resource has invalid project ID %q: %w", labels[constants.ProjectLabel], err)
+	}
+
 	out := openapi.ProjectScopedResourceReadMetadata{
-		OrganizationId: labels[constants.OrganizationLabel],
-		ProjectId:      labels[constants.ProjectLabel],
+		OrganizationId: organizationID,
+		ProjectId:      projectID,
 	}
 
 	_ = json.Unmarshal(tempJSON, &out)
 
-	return out
+	return out, nil
 }
 
 // ObjectMetadata implements a builder pattern.
@@ -209,15 +236,15 @@ func NewObjectMetadata(metadata *openapi.ResourceWriteMetadata, namespace string
 }
 
 // WithOrganization adds an organization for scoped resources.
-func (o *ObjectMetadata) WithOrganization(id string) *ObjectMetadata {
-	o.Labels[constants.OrganizationLabel] = id
+func (o *ObjectMetadata) WithOrganization(id uuid.UUID) *ObjectMetadata {
+	o.Labels[constants.OrganizationLabel] = id.String()
 
 	return o
 }
 
 // WithProject adds a project for scoped resources.
-func (o *ObjectMetadata) WithProject(id string) *ObjectMetadata {
-	o.Labels[constants.ProjectLabel] = id
+func (o *ObjectMetadata) WithProject(id uuid.UUID) *ObjectMetadata {
+	o.Labels[constants.ProjectLabel] = id.String()
 
 	return o
 }
@@ -225,6 +252,13 @@ func (o *ObjectMetadata) WithProject(id string) *ObjectMetadata {
 // WithLabel allows non-generic labels to be attached to a resource.
 func (o *ObjectMetadata) WithLabel(key, value string) *ObjectMetadata {
 	o.Labels[key] = value
+
+	return o
+}
+
+// WithLabelID allows a UUID-typed label to be attached to a resource.
+func (o *ObjectMetadata) WithLabelID(key string, value uuid.UUID) *ObjectMetadata {
+	o.Labels[key] = value.String()
 
 	return o
 }

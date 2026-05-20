@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -34,19 +35,20 @@ import (
 )
 
 const (
-	id           = "passport"
-	name         = "cyril"
-	description  = "some text"
-	createdBy    = "shirley"
-	modifiedBy   = "eric"
-	tagKey       = "yale"
-	tagValue     = "lock"
-	organization = "acme"
-	project      = "foo"
+	name        = "cyril"
+	description = "some text"
+	createdBy   = "shirley"
+	modifiedBy  = "eric"
+	tagKey      = "yale"
+	tagValue    = "lock"
 )
 
 //nolint:gochecknoglobals
 var (
+	id           = uuid.MustParse("b4d1d97c-1f4d-4b2e-9c9d-1e2f3a4b5c6d")
+	organization = uuid.MustParse("c5e2e08d-2a5e-4c3f-8d0e-2f3a4b5c6d7e")
+	project      = uuid.MustParse("d6f3f19e-3b6f-4d4a-9e1f-3a4b5c6d7e8f")
+
 	creationTime = time.Date(1970, 0, 0, 0, 0, 0, 0, time.UTC)
 	deletionTime = time.Date(1980, 0, 0, 0, 0, 0, 0, time.UTC)
 	modifiedTime = time.Date(1990, 0, 0, 0, 0, 0, 0, time.UTC)
@@ -61,7 +63,7 @@ type basicObject struct {
 func newBasicObject() *basicObject {
 	return &basicObject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              id,
+			Name:              id.String(),
 			CreationTimestamp: metav1.Time{Time: creationTime},
 			Labels: map[string]string{
 				constants.NameLabel: name,
@@ -81,13 +83,13 @@ type advancedObject struct {
 func newAdvancedObject() *advancedObject {
 	return &advancedObject{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              id,
+			Name:              id.String(),
 			CreationTimestamp: metav1.Time{Time: creationTime},
 			DeletionTimestamp: &metav1.Time{Time: deletionTime},
 			Labels: map[string]string{
 				constants.NameLabel:         name,
-				constants.OrganizationLabel: organization,
-				constants.ProjectLabel:      project,
+				constants.OrganizationLabel: organization.String(),
+				constants.ProjectLabel:      project.String(),
 			},
 			Annotations: map[string]string{
 				constants.DescriptionAnnotation:       description,
@@ -118,7 +120,8 @@ func TestResourceReadMetadataBasic(t *testing.T) {
 
 	in := newBasicObject()
 
-	out := conversion.ResourceReadMetadata(in, nil)
+	out, err := conversion.ResourceReadMetadata(in, nil)
+	require.NoError(t, err)
 
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
@@ -140,7 +143,8 @@ func TestResourceReadMetadataAdvanced(t *testing.T) {
 
 	in := newAdvancedObject()
 
-	out := conversion.ResourceReadMetadata(in, tags())
+	out, err := conversion.ResourceReadMetadata(in, tags())
+	require.NoError(t, err)
 
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
@@ -166,7 +170,8 @@ func TestOrganizationScopedResourceReadMetadataAdvanced(t *testing.T) {
 
 	in := newAdvancedObject()
 
-	out := conversion.OrganizationScopedResourceReadMetadata(in, tags())
+	out, err := conversion.OrganizationScopedResourceReadMetadata(in, tags())
+	require.NoError(t, err)
 
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
@@ -194,7 +199,8 @@ func TestProjectScopedResourceReadMetadata(t *testing.T) {
 
 	in := newAdvancedObject()
 
-	out := conversion.ProjectScopedResourceReadMetadata(in, tags())
+	out, err := conversion.ProjectScopedResourceReadMetadata(in, tags())
+	require.NoError(t, err)
 
 	require.Equal(t, id, out.Id)
 	require.Equal(t, name, out.Name)
