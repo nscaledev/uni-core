@@ -4,8 +4,9 @@ description: A Helm chart for deploying Unikorn Core
 
 type: application
 
-version: 1.16.1
-appVersion: 1.16.1
+# sentinel: patched at release time by release.yaml; overridden by --version for nightly builds
+version: 0.0.0
+appVersion: 0.0.0
 
 icon: https://assets.unikorn-cloud.org/images/logos/dark-on-light/icon.svg
 
