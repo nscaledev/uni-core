@@ -25,6 +25,7 @@ import (
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch"
+	"github.com/google/uuid"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/constants"
@@ -195,6 +196,30 @@ func NewObjectMetadata(metadata *openapi.ResourceWriteMetadata, namespace string
 	o := &ObjectMetadata{
 		Namespace: namespace,
 		Name:      util.GenerateResourceID(),
+		Labels: map[string]string{
+			constants.NameLabel: metadata.Name,
+		},
+		Annotations: map[string]string{},
+	}
+
+	if metadata.Description != nil {
+		o.Annotations[constants.DescriptionAnnotation] = *metadata.Description
+	}
+
+	return o
+}
+
+// NewDeterministicObjectMetadata is like NewObjectMetadata but derives the Kubernetes
+// resource name deterministically from idNamespace and invariant using UUID v5. This
+// enables Kubernetes 409 conflict detection for duplicate logical resources — a second
+// create with the same invariant will always collide with the first.
+// Each resource type should define its own idNamespace constant to prevent cross-type
+// collisions. invariant must be derived from stable, immutable fields; time-varying
+// or mutable values silently break the deduplication guarantee.
+func NewDeterministicObjectMetadata(metadata *openapi.ResourceWriteMetadata, namespace string, idNamespace uuid.UUID, invariant string) *ObjectMetadata {
+	o := &ObjectMetadata{
+		Namespace: namespace,
+		Name:      util.GenerateDeterministicResourceID(idNamespace, invariant),
 		Labels: map[string]string{
 			constants.NameLabel: metadata.Name,
 		},
