@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -110,6 +111,28 @@ func tags() unikornv1.TagList {
 			Value: tagValue,
 		},
 	}
+}
+
+// TestNewDeterministicObjectMetadata checks the deterministic constructor sets the
+// expected Kubernetes metadata fields and that its output is stable.
+func TestNewDeterministicObjectMetadata(t *testing.T) {
+	t.Parallel()
+
+	ns := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+	meta := &openapi.ResourceWriteMetadata{Name: name, Description: ptr.To(description)}
+
+	a := conversion.NewDeterministicObjectMetadata(meta, "default", ns, "net-1:host-1").Get()
+	b := conversion.NewDeterministicObjectMetadata(meta, "default", ns, "net-1:host-1").Get()
+
+	require.Equal(t, a.Name, b.Name)
+	require.Equal(t, "default", a.Namespace)
+	require.Equal(t, name, a.Labels[constants.NameLabel])
+	require.Equal(t, description, a.Annotations[constants.DescriptionAnnotation])
+
+	// Different invariant must yield a different name.
+	c := conversion.NewDeterministicObjectMetadata(meta, "default", ns, "net-1:host-2").Get()
+	require.NotEqual(t, a.Name, c.Name)
 }
 
 // TestResourceReadMetadataBasic checks that a minimal input yields a minimal output.

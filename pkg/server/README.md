@@ -14,6 +14,15 @@ At the top level, this directory brings together:
 
 This package family is tightly connected to the shared OpenAPI substrate documented in [pkg/openapi](../openapi/README.md), because route resolution, schema-driven middleware behavior, and common error responses all depend on that contract.
 
+## Resource ID Allocation Strategy
+
+All Kubernetes resource names in this platform are UUIDs. There are two strategies and the choice is architectural, not cosmetic:
+
+- **Random UUID** (`NewObjectMetadata`): use for resources whose identity has no natural key — the platform is the sole authority on what the name is. This is the default.
+- **Deterministic UUID** (`NewDeterministicObjectMetadata`): use when the resource participates in a uniqueness contract derived from its content — for example, a hostname on a virtual network must be unique within that network, so the name is derived from `(network-id, hostname)`. Two creates with the same invariant produce the same Kubernetes name and the second is rejected with a 409, giving conflict detection without a read-before-write.
+
+The rule of thumb: if a duplicate of this resource would be silently wrong — not just redundant but semantically broken (name collision on a network, duplicate route entry, etc.) — use deterministic IDs. Otherwise use random IDs.
+
 ## Invariants And Guard Rails
 
 - `pkg/server` is for common API-server behavior across services, not for service-specific handler logic, auth policy, or domain-owned middleware.
