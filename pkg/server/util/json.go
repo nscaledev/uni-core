@@ -23,6 +23,8 @@ import (
 	"io"
 	"net/http"
 
+	servererrors "github.com/unikorn-cloud/core/pkg/server/errors"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -47,15 +49,17 @@ func WriteJSONResponse(w http.ResponseWriter, r *http.Request, code int, respons
 }
 
 // ReadJSONBody is a generic request reader to unmarshal JSON bodies.
-// NOTE: This should have passed OpenAPI validation, so is an internal error.
+// JSON decode failures (empty body, malformed JSON, type mismatches) are
+// returned as a typed 400 client error; read failures are internal errors.
 func ReadJSONBody(r *http.Request, v any) error {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fmt.Errorf("%w: unable to read request body", err)
 	}
 
-	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("%w: unable to unmarshal request body", err)
+	err = json.Unmarshal(body, v)
+	if err != nil {
+		return servererrors.OAuth2InvalidRequest("the request body is missing or malformed").WithError(err)
 	}
 
 	return nil
