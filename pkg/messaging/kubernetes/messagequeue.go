@@ -19,12 +19,14 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/unikorn-cloud/core/pkg/messaging"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 
@@ -38,15 +40,15 @@ type MessageQueue struct {
 
 	config    *rest.Config
 	scheme    *runtime.Scheme
-	object    client.Object
+	prototype client.Object
 	consumers []messaging.Consumer
 }
 
 func New(config *rest.Config, scheme *runtime.Scheme, object client.Object) *MessageQueue {
 	return &MessageQueue{
-		config: config,
-		scheme: scheme,
-		object: object,
+		config:    config,
+		scheme:    scheme,
+		prototype: object,
 	}
 }
 
@@ -70,7 +72,7 @@ func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer)
 
 	q.Client = manager.GetClient()
 
-	if err := cr.NewControllerManagedBy(manager).For(q.object).Complete(q); err != nil {
+	if err := cr.NewControllerManagedBy(manager).For(q.prototype).Complete(q); err != nil {
 		return err
 	}
 
@@ -82,8 +84,13 @@ func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer)
 }
 
 func (q *MessageQueue) Reconcile(ctx context.Context, request cr.Request) (cr.Result, error) {
-	if err := q.Get(ctx, request.NamespacedName, q.object); err != nil {
-		if errors.IsNotFound(err) {
+	object, ok := q.prototype.DeepCopyObject().(client.Object)
+	if !ok {
+		return cr.Result{}, fmt.Errorf("%w: prototype copy could not be cast to client.Object", errors.ErrUnsupported)
+	}
+
+	if err := q.Get(ctx, request.NamespacedName, object); err != nil {
+		if apierrors.IsNotFound(err) {
 			return cr.Result{}, nil
 		}
 
@@ -91,10 +98,10 @@ func (q *MessageQueue) Reconcile(ctx context.Context, request cr.Request) (cr.Re
 	}
 
 	envelope := &messaging.Envelope{
-		ResourceID: q.object.GetName(),
+		ResourceID: object.GetName(),
 	}
 
-	if t := q.object.GetDeletionTimestamp(); t != nil {
+	if t := object.GetDeletionTimestamp(); t != nil {
 		envelope.DeletionTimestamp = &t.Time
 	}
 
