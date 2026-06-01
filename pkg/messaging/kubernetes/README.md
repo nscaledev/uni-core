@@ -14,11 +14,12 @@ is essentially controller-runtime reconciliation dressed up as a queue.
 ## What Lives Here
 
 - `MessageQueue`, which owns:
-  - manager construction
-  - leader election
+  - manager construction and leader election when run standalone
   - watch registration for one object type
   - in-process fan-out to registered consumers
 - `Run()`, which starts the manager and controller.
+- `SetupWithManager()`, which registers the controller with an existing
+  controller-runtime manager.
 - `Reconcile()`, which loads the watched object and converts it into the minimal
   `messaging.Envelope` understood by consumers.
 
@@ -47,7 +48,3 @@ is essentially controller-runtime reconciliation dressed up as a queue.
   queue-like semantics.
 - Only one backend exists today. Future Kafka/NATS-style backends are intended by
   the abstraction but have not yet pressure-tested it.
-- `Reconcile()` reuses the same `q.object` storage when fetching objects. That is
-  fine in the current narrow usage, but it reinforces that this code is shaped
-  around controller-runtime flow rather than a broad general-purpose messaging
-  runtime.
