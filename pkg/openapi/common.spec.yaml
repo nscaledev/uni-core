@@ -43,6 +43,15 @@ components:
         trace_id:
           description: Unique trace identifier for the request.
           type: string
+    resourceUUID:
+      description: |-
+        A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+      type: string
+      format: uuid
+    organizationUUID:
+      $ref: '#/components/schemas/resourceUUID'
+    projectUUID:
+      $ref: '#/components/schemas/resourceUUID'
     kubernetesLabelValue:
       description: |-
         A valid Kubernetes label value, typically used for resource names that can be

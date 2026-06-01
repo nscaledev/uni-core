@@ -5,6 +5,8 @@ package openapi
 
 import (
 	"time"
+
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for BearerMethod.
@@ -136,6 +138,9 @@ type OrganizationScopedResourceReadMetadata struct {
 	Tags *TagList `json:"tags,omitempty"`
 }
 
+// OrganizationUUID A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+type OrganizationUUID = ResourceUUID
+
 // ProjectScopedResourceReadMetadata defines model for projectScopedResourceReadMetadata.
 type ProjectScopedResourceReadMetadata struct {
 	// CreatedBy The user who created the resource.
@@ -178,6 +183,9 @@ type ProjectScopedResourceReadMetadata struct {
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
 }
+
+// ProjectUUID A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+type ProjectUUID = ResourceUUID
 
 // ResourceHealthStatus The health state of a resource.
 type ResourceHealthStatus string
@@ -234,6 +242,9 @@ type ResourceReadMetadata struct {
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
 }
+
+// ResourceUUID A unique resource identifier, formatted as a UUID as defined by RFC 4122.
+type ResourceUUID = openapi_types.UUID
 
 // ResourceWriteMetadata Metadata required for all API resource reads and writes.
 type ResourceWriteMetadata = ResourceMetadata
