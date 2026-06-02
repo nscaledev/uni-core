@@ -19,17 +19,20 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/unikorn-cloud/core/pkg/messaging"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 
 	cr "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	crmanager "sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 // MessageQueue implements a message queue like interface using shared informers.
@@ -38,23 +41,28 @@ type MessageQueue struct {
 
 	config    *rest.Config
 	scheme    *runtime.Scheme
-	object    client.Object
+	prototype client.Object
 	consumers []messaging.Consumer
 }
 
 func New(config *rest.Config, scheme *runtime.Scheme, object client.Object) *MessageQueue {
 	return &MessageQueue{
-		config: config,
-		scheme: scheme,
-		object: object,
+		config:    config,
+		scheme:    scheme,
+		prototype: object,
+	}
+}
+
+// NewForManager creates a queue that can be registered with an existing manager.
+func NewForManager(object client.Object) *MessageQueue {
+	return &MessageQueue{
+		prototype: object,
 	}
 }
 
 var _ = messaging.Queue(&MessageQueue{})
 
 func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer) error {
-	q.consumers = consumers
-
 	options := cr.Options{
 		// Explicitly adds custom resource support.
 		Scheme: q.scheme,
@@ -68,22 +76,31 @@ func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer)
 		return err
 	}
 
+	if err := q.SetupWithManager(manager, consumers...); err != nil {
+		return err
+	}
+
+	return manager.Start(ctx)
+}
+
+// SetupWithManager registers the queue's controller with an existing manager.
+func (q *MessageQueue) SetupWithManager(manager crmanager.Manager, consumers ...messaging.Consumer) error {
+	q.consumers = consumers
 	q.Client = manager.GetClient()
 
-	if err := cr.NewControllerManagedBy(manager).For(q.object).Complete(q); err != nil {
-		return err
-	}
-
-	if err := manager.Start(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return cr.NewControllerManagedBy(manager).
+		For(q.prototype).
+		Complete(q)
 }
 
 func (q *MessageQueue) Reconcile(ctx context.Context, request cr.Request) (cr.Result, error) {
-	if err := q.Get(ctx, request.NamespacedName, q.object); err != nil {
-		if errors.IsNotFound(err) {
+	object, ok := q.prototype.DeepCopyObject().(client.Object)
+	if !ok {
+		return cr.Result{}, fmt.Errorf("%w: prototype copy could not be cast to client.Object", errors.ErrUnsupported)
+	}
+
+	if err := q.Get(ctx, request.NamespacedName, object); err != nil {
+		if apierrors.IsNotFound(err) {
 			return cr.Result{}, nil
 		}
 
@@ -91,10 +108,10 @@ func (q *MessageQueue) Reconcile(ctx context.Context, request cr.Request) (cr.Re
 	}
 
 	envelope := &messaging.Envelope{
-		ResourceID: q.object.GetName(),
+		ResourceID: object.GetName(),
 	}
 
-	if t := q.object.GetDeletionTimestamp(); t != nil {
+	if t := object.GetDeletionTimestamp(); t != nil {
 		envelope.DeletionTimestamp = &t.Time
 	}
 
