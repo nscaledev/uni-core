@@ -245,6 +245,16 @@ type ScopeList = []string
 // Pre-releases and variants are not currently supported.
 type Semver = string
 
+// ServiceVersionRead Build version information for the running service, stamped into the
+// binary at release time.  Developer builds report version 0.0.0.
+type ServiceVersionRead struct {
+	// Name The service application name.
+	Name string `json:"name"`
+
+	// Version The service release version, e.g. v1.2.3.
+	Version string `json:"version"`
+}
+
 // StaticResourceMetadata defines model for staticResourceMetadata.
 type StaticResourceMetadata struct {
 	// CreatedBy The user who created the resource.
@@ -307,6 +317,10 @@ type NotFoundResponse = Error
 
 // OpenidProtectedResourceResponse OpenID athentication server discovery configuration.
 type OpenidProtectedResourceResponse = OpenidProtectedResource
+
+// ServiceVersionResponse Build version information for the running service, stamped into the
+// binary at release time.  Developer builds report version 0.0.0.
+type ServiceVersionResponse = ServiceVersionRead
 
 // UnauthorizedResponse Generic error message, compatible with oauth2.
 type UnauthorizedResponse = Error

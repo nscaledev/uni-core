@@ -55,6 +55,21 @@ components:
         Pre-releases and variants are not currently supported.
       type: string
       pattern: '^v\d+\.\d+\.\d+$'
+    serviceVersionRead:
+      description: |-
+        Build version information for the running service, stamped into the
+        binary at release time.  Developer builds report version 0.0.0.
+      type: object
+      required:
+      - name
+      - version
+      properties:
+        name:
+          description: The service application name.
+          type: string
+        version:
+          description: The service release version, e.g. v1.2.3.
+          type: string
     tag:
       description: |-
         A tag mapping arbitrary names to values.  These have no special meaning
@@ -339,3 +354,12 @@ components:
             - email
             bearer_methods_supported:
             - header
+    serviceVersionResponse:
+      description: Build version information for the running service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/serviceVersionRead'
+          example:
+            name: unikorn-region-server
+            version: v1.16.7
