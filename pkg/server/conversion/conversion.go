@@ -42,12 +42,24 @@ var (
 	ErrAnnotation = errors.New("a required annotation was missing")
 )
 
-// convertStatusCondition translates from Kubernetes status conditions to API ones.
-func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus {
+type ProviderProvisioningStatusReader interface {
+	ProviderProvisioningStatusRead() *openapi.ResourceProvisioningStatus
+}
+
+// convertProvisioningStatus derives the API provisioning status from the resource,
+// in precedence order: a deletion timestamp always wins, then a provider-observed
+// provisioning status if one is recorded, then the available status condition.
+func convertProvisioningStatus(in metav1.Object) openapi.ResourceProvisioningStatus {
 	// We set the status after a reconcile, so this allows us to
 	// reflect the correct state to the user immediately.
 	if in.GetDeletionTimestamp() != nil {
 		return openapi.ResourceProvisioningStatusDeprovisioning
+	}
+
+	if reader, ok := in.(ProviderProvisioningStatusReader); ok {
+		if status := reader.ProviderProvisioningStatusRead(); status != nil {
+			return *status
+		}
 	}
 
 	// Not a resource with status conditions, consider it provisioned.
@@ -113,7 +125,7 @@ func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.Reso
 		Id:                 in.GetName(),
 		Name:               labels[constants.NameLabel],
 		CreationTime:       in.GetCreationTimestamp().Time,
-		ProvisioningStatus: convertStatusCondition(in),
+		ProvisioningStatus: convertProvisioningStatus(in),
 		HealthStatus:       convertHealthCondition(in),
 	}
 

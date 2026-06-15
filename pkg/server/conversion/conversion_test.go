@@ -75,6 +75,22 @@ func (o *basicObject) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1
 	return nil, ErrAny
 }
 
+type objectWithProviderProvisioningStatus struct {
+	basicObject
+	providerProvisioningStatus *openapi.ResourceProvisioningStatus
+}
+
+func newObjectWithProviderProvisioningStatus(status *openapi.ResourceProvisioningStatus) *objectWithProviderProvisioningStatus {
+	return &objectWithProviderProvisioningStatus{
+		basicObject:                *newBasicObject(),
+		providerProvisioningStatus: status,
+	}
+}
+
+func (o *objectWithProviderProvisioningStatus) ProviderProvisioningStatusRead() *openapi.ResourceProvisioningStatus {
+	return o.providerProvisioningStatus
+}
+
 type advancedObject struct {
 	metav1.ObjectMeta
 }
@@ -155,6 +171,39 @@ func TestResourceReadMetadataBasic(t *testing.T) {
 	require.Nil(t, out.ModifiedTime)
 	require.Nil(t, out.DeletionTime)
 	require.Nil(t, out.Tags)
+}
+
+func TestResourceReadMetadataUsesProviderProvisioningStatus(t *testing.T) {
+	t.Parallel()
+
+	status := openapi.ResourceProvisioningStatusQueued
+	in := newObjectWithProviderProvisioningStatus(&status)
+
+	out := conversion.ResourceReadMetadata(in, nil)
+
+	require.Equal(t, openapi.ResourceProvisioningStatusQueued, out.ProvisioningStatus)
+}
+
+func TestResourceReadMetadataFallsBackWhenProviderProvisioningStatusUnset(t *testing.T) {
+	t.Parallel()
+
+	in := newObjectWithProviderProvisioningStatus(nil)
+
+	out := conversion.ResourceReadMetadata(in, nil)
+
+	require.Equal(t, openapi.ResourceProvisioningStatusPending, out.ProvisioningStatus)
+}
+
+func TestResourceReadMetadataDeletionPrecedesProviderProvisioningStatus(t *testing.T) {
+	t.Parallel()
+
+	status := openapi.ResourceProvisioningStatusQueued
+	in := newObjectWithProviderProvisioningStatus(&status)
+	in.DeletionTimestamp = &metav1.Time{Time: deletionTime}
+
+	out := conversion.ResourceReadMetadata(in, nil)
+
+	require.Equal(t, openapi.ResourceProvisioningStatusDeprovisioning, out.ProvisioningStatus)
 }
 
 // TestResourceReadMetadataAdvanced checks that a maximizes input yields a maximized output.

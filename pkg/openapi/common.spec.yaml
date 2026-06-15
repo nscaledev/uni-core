@@ -153,6 +153,7 @@ components:
       enum:
       - unknown
       - pending
+      - queued
       - provisioning
       - provisioned
       - deprovisioning

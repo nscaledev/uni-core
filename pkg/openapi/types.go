@@ -43,6 +43,7 @@ const (
 	ResourceProvisioningStatusPending        ResourceProvisioningStatus = "pending"
 	ResourceProvisioningStatusProvisioned    ResourceProvisioningStatus = "provisioned"
 	ResourceProvisioningStatusProvisioning   ResourceProvisioningStatus = "provisioning"
+	ResourceProvisioningStatusQueued         ResourceProvisioningStatus = "queued"
 	ResourceProvisioningStatusUnknown        ResourceProvisioningStatus = "unknown"
 )
 
