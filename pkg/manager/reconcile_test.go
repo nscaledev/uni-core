@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -303,6 +304,114 @@ func TestReconcileCreateError(t *testing.T) {
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
 	assert.Contains(t, result.Finalizers, constants.Finalizer)
 	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
+}
+
+// TestReconcileCreateTerminal tests that a terminal provisioning disposition is
+// surfaced as an error but parked (not requeued), and that the operator-only
+// "why" does not leak into the user-visible condition message.
+func TestReconcileCreateTerminal(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	const (
+		reason = "invalid_flavor"
+		why    = "openstack flavor m1.bananas not found on host compute-7"
+	)
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Terminal(reason, why))
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	// Terminal failures must not be requeued.
+	assert.Zero(t, result.RequeueAfter)
+	assert.False(t, result.Requeue)
+
+	// Does the resource have all the correct metadata and status information set?
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	assert.Contains(t, resource.Finalizers, constants.Finalizer)
+	mustAssertStatus(t, &resource, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
+
+	// The user-visible message carries the closed-vocabulary reason, never the
+	// operator-only why.
+	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
+	assert.NoError(t, err)
+	assert.Equal(t, reason, condition.Message)
+	assert.NotContains(t, condition.Message, why)
+}
+
+// TestReconcileCreateTerminalWrapped tests the interesting leak path: a terminal
+// error wrapped in outer prose (e.g. fmt.Errorf("...: %w", ...)). The
+// disposition must still be detected through the wrapping (parked, not
+// requeued), and the user-visible message must carry only the typed Reason() —
+// neither the outer wrapping prose nor the operator-only why may leak.
+func TestReconcileCreateTerminalWrapped(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	const (
+		reason     = "invalid_flavor"
+		why        = "openstack flavor m1.bananas not found on host compute-7"
+		outerProse = "internal scheduler at 10.0.0.1 blew up"
+	)
+
+	wrapped := fmt.Errorf("%s: %w", outerProse, provisioners.Terminal(reason, why))
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(wrapped)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	// IsTerminal must see through the wrapping: parked, not requeued.
+	assert.Zero(t, result.RequeueAfter)
+	assert.False(t, result.Requeue)
+
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	mustAssertStatus(t, &resource, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
+
+	// errors.As must strip the outer prose: the message is the reason code only,
+	// with neither the wrapping text nor the operator-only why.
+	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
+	assert.NoError(t, err)
+	assert.Equal(t, reason, condition.Message)
+	assert.NotContains(t, condition.Message, outerProse)
+	assert.NotContains(t, condition.Message, why)
 }
 
 // TestReconcileDelete checks that a resource marked as being deleted has the

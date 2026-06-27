@@ -254,6 +254,19 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	// NOTE: DO NOT return an error, and use a constant period or you will
 	// suffer from an exponential back-off and kill performance.
 	if perr != nil {
+		// Terminal dispositions are parked, not retried: requeuing them just
+		// burns the workqueue on a failure that will not self-heal (see the
+		// provisioners package for the ErrTerminal/ErrUserActionRequired
+		// rationale). The condition has already been written above, so the
+		// failure remains visible. Recovery is out-of-band: a spec change wakes
+		// an ErrUserActionRequired resource via the generation-change watch
+		// predicate, while ErrTerminal awaits operator intervention.
+		if provisioners.IsTerminal(perr) {
+			log.Error(perr, "provisioning terminally failed, parking resource")
+
+			return reconcile.Result{}, nil
+		}
+
 		if !errors.Is(perr, provisioners.ErrYield) {
 			log.Error(perr, "provisioning failed unexpectedly")
 		}
@@ -299,9 +312,15 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		reason = unikornv1.ConditionReasonCancelled
 		message = "Aborted due to controller shutdown"
 	default:
+		// Everything else, including the terminal dispositions
+		// (ErrTerminal/ErrUserActionRequired), piggybacks on Errored: there is
+		// no separate enum value yet, and today there is no observable
+		// distinction between a retrying and a terminal failure anyway. The
+		// difference is purely in the requeue decision (see reconcileNormal),
+		// not in the surfaced condition.
 		status = corev1.ConditionFalse
 		reason = unikornv1.ConditionReasonErrored
-		message = fmt.Sprintf("Unhandled error: %v", err)
+		message = provisioningFailureMessage(err)
 	}
 
 	object.StatusConditionWrite(unikornv1.ConditionAvailable, status, reason, message)
@@ -311,4 +330,25 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	}
 
 	return nil
+}
+
+// provisioningFailureMessage derives the user-visible condition message for a
+// failed provision.
+//
+// A typed *provisioners.Error carries a stable, closed-vocabulary reason code
+// that is safe to surface; we use that and deliberately do NOT include its Why()
+// (operator-facing detail belongs in logs, not on a user-readable condition —
+// see CWE-209). The Why() is still logged by reconcileNormal because the typed
+// error embeds it in Error().
+//
+// Untyped errors retain the legacy stringified form. That is a known fail-open
+// path (it can leak internal detail) and is the reason new failure modes should
+// return a typed provisioners.Error rather than a bare error.
+func provisioningFailureMessage(err error) string {
+	var perr *provisioners.Error
+	if errors.As(err, &perr) {
+		return perr.Reason()
+	}
+
+	return fmt.Sprintf("Unhandled error: %v", err)
 }
