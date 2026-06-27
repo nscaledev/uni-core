@@ -9,9 +9,55 @@ This package itself is intentionally small:
 - the `Provisioner` and `ManagerProvisioner` interfaces
 - the `RemoteCluster` interface for deriving remote kubeconfigs and identities
 - shared metadata for provisioner names
-- shared sentinel errors, especially `ErrYield`
+- shared sentinel errors and error dispositions (`ErrYield`, `ErrTerminal`,
+  `ErrUserActionRequired`) plus the `Error` carrier type
 
 Most of the real behavior lives in the lower-level adapters and combinators under this directory.
+
+## Error Dispositions
+
+A provisioner communicates *what the controller should do next* through the
+**disposition** of the error it returns. The disposition — not a human-readable
+message — is the contract; the manager branches on it with `errors.Is`. This is
+why dispositions are sentinels, never prose.
+
+| Disposition | Returned by | Manager behaviour | Recovery |
+| --- | --- | --- | --- |
+| `nil` | success | mark `Available: Provisioned` | n/a |
+| `ErrYield` | `ErrYield`, `Blocked(...)` | requeue on the fixed yield timeout | next reconcile |
+| `ErrTerminal` | `Terminal(reason, why)` | write `Errored`, **stop requeuing** | operator intervention |
+| `ErrUserActionRequired` | `UserActionRequired(reason, why)` | write `Errored`, **stop requeuing** | a spec change (generation bump) wakes the controller |
+
+`ErrTerminal` and `ErrUserActionRequired` are *terminal*: requeuing them just
+burns the workqueue on a failure that will not self-heal. Use
+`provisioners.IsTerminal(err)` to test for either. They differ only in how a
+resource is revived — that difference lives in the watch/predicate layer, not in
+the requeue decision.
+
+### The `Error` carrier and the `why`
+
+`Error` wraps a disposition with two extra fields so a single returned value
+serves both audiences cleanly:
+
+- `Reason()` — a short, stable, closed-vocabulary code (e.g.
+  `insufficient_capacity`). Safe to surface to users; this is what the manager
+  writes into the `Available` condition message.
+- `Why()` — operator-facing detail. **Log-safe, not user-safe.** It is embedded
+  in `Error()` so existing logging surfaces it for free, but it is deliberately
+  kept out of the user-visible condition (CWE-209). Routing it to a user surface
+  is a separate, explicit decision.
+
+New failure modes should return a typed `Error` rather than a bare error: the
+manager's untyped fallback stringifies the raw error into the user-visible
+message, which is a known fail-open leak.
+
+### Caveat: terminality is not yet wired everywhere
+
+The dispositions exist and the manager honours them, but the providers that
+should *emit* them mostly still return bare errors or `ErrYield`. Adopting them
+is incremental. In particular, a controller that uses `ErrUserActionRequired`
+must also reset any per-resource retry bookkeeping on a generation change, or the
+resource will immediately re-enter the terminal state instead of retrying.
 
 ## Invariants And Guard Rails
 
