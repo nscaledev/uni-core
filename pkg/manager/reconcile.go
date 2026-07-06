@@ -279,8 +279,21 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	return reconcile.Result{}, nil
 }
 
-// handleReconcileCondition inspects the error, if any, that halted the provisioning and reports
-// this appropriately in the status.
+// handleReconcileCondition maps the outcome of a (de)provision — the error, or
+// nil on success — onto the resource's Available condition. It works in two
+// distinct phases, and reads best with that in mind:
+//
+//  1. Disposition → generic condition. The switch below derives the status and a
+//     lifecycle-default reason/message (Provisioned/Provisioning/Errored, or the
+//     Deprovision* equivalents) from the error's disposition *alone*. This is
+//     everything a bare sentinel error — e.g. a plain provisioners.ErrYield with
+//     no detail — can tell us, and it is what keys off the same disposition the
+//     requeue logic branches on (see reconcileNormal/reconcileDelete).
+//  2. Typed error → data enrichment. A typed *provisioners.Error additionally
+//     carries a specific reason and a user-safe message. When present, those
+//     fall through and *override* the phase-1 reason/message (status is left as
+//     phase 1 set it). So the switch is not the last word: for a typed error it
+//     only supplies the fallback that the enrichment block then replaces.
 func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikornv1.ManagableResourceInterface, err error, deprovision bool) error {
 	var status corev1.ConditionStatus
 
@@ -288,6 +301,9 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 
 	var message string
 
+	// Phase 1: derive status and a lifecycle-default reason/message from the
+	// disposition. context.Canceled is the one outcome we deliberately do not
+	// record, leaving the existing condition untouched.
 	switch {
 	case err == nil:
 		status = corev1.ConditionTrue
@@ -313,13 +329,36 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	default:
 		// Everything else, including the terminal dispositions
 		// (ErrTerminal/ErrUserActionRequired), piggybacks on Errored: there is
-		// no separate enum value yet, and today there is no observable
-		// distinction between a retrying and a terminal failure anyway. The
-		// difference is purely in the requeue decision (see reconcileNormal),
-		// not in the surfaced condition.
+		// no observable distinction between a retrying and a terminal failure in
+		// the surfaced condition (the difference is purely in the requeue
+		// decision, see reconcileNormal). A bare error stringifies here as a
+		// last-resort fallback; the typed override below replaces it when the
+		// error carries a reason.
 		status = corev1.ConditionFalse
 		reason = unikornv1.ConditionReasonErrored
-		message = provisioningFailureMessage(err)
+		message = fmt.Sprintf("Unhandled error: %v", err)
+	}
+
+	// Phase 2: enrich. A typed provisioning error carries its own closed-vocabulary
+	// reason and a user-safe message; write those straight onto the condition,
+	// replacing the phase-1 lifecycle default. The operator-only detail stays in
+	// the error's fmt.Errorf wrapping, which reconcileNormal logs — errors.As
+	// recovers only the safe surface here, so nothing internal leaks to the user
+	// (CWE-209).
+	//
+	// The override is disposition- and path-agnostic on purpose: it enriches the
+	// reason/message regardless of the switch arm, but leaves status alone. Typed
+	// errors are failure-side — today only the provision path produces them (the
+	// Dependency* constructors), so on the deprovision path this is inert. Were a
+	// Deprovision to return one, its failure reason would replace the
+	// Deprovisioning lifecycle reason; that is acceptable, not a bug: the coarse
+	// API projection keys off the deletion timestamp (not the reason), and the
+	// requeue decision keys off the disposition, so only the raw condition Reason
+	// would show the blocker — arguably the more useful thing to surface.
+	var perr *provisioners.Error
+	if errors.As(err, &perr) {
+		reason = perr.Reason()
+		message = perr.Message()
 	}
 
 	object.SetProvisioningCondition(status, reason, message)
@@ -329,25 +368,4 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	}
 
 	return nil
-}
-
-// provisioningFailureMessage derives the user-visible condition message for a
-// failed provision.
-//
-// A typed *provisioners.Error carries a stable, closed-vocabulary reason code
-// that is safe to surface; we use that and deliberately do NOT include its Why()
-// (operator-facing detail belongs in logs, not on a user-readable condition —
-// see CWE-209). The Why() is still logged by reconcileNormal because the typed
-// error embeds it in Error().
-//
-// Untyped errors retain the legacy stringified form. That is a known fail-open
-// path (it can leak internal detail) and is the reason new failure modes should
-// return a typed provisioners.Error rather than a bare error.
-func provisioningFailureMessage(err error) string {
-	var perr *provisioners.Error
-	if errors.As(err, &perr) {
-		return perr.Reason()
-	}
-
-	return fmt.Sprintf("Unhandled error: %v", err)
 }
