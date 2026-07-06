@@ -311,6 +311,26 @@ const (
 	ConditionReasonDeprovisioned ProvisioningConditionReason = "Deprovisioned"
 )
 
+// Failure reasons for ConditionAvailable. These are surfaced to the user and
+// classified by the API projection (see the server conversion package), so keep
+// them stable and free of internal detail. Producers set them through the
+// provisioners.Dependency* constructors, which bind each reason to the
+// disposition (yield vs terminal) that matches its coarse status.
+const (
+	// ConditionReasonDependencyNotReady means a dependency exists but is not yet
+	// provisioned. Transient: the wait clears when the dependency is ready, so it
+	// projects to the coarse provisioning (in-flight) status.
+	ConditionReasonDependencyNotReady ProvisioningConditionReason = "DependencyNotReady"
+	// ConditionReasonDependencyFailed means a dependency the resource is waiting
+	// on is itself in an error state. Still a yield from our side (it may
+	// recover), so it too projects to the coarse provisioning status.
+	ConditionReasonDependencyFailed ProvisioningConditionReason = "DependencyFailed"
+	// ConditionReasonDependencyNotFound means a referenced dependency does not
+	// exist. Terminal: no amount of waiting can resolve it, so it projects to the
+	// coarse error status.
+	ConditionReasonDependencyNotFound ProvisioningConditionReason = "DependencyNotFound"
+)
+
 // HealthConditionReason defines the possible reasons of a resource's
 // health condition.
 type HealthConditionReason string

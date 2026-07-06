@@ -62,24 +62,34 @@ func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus
 		return openapi.ResourceProvisioningStatusPending
 	}
 
-	// Any reason we don't recognise (e.g. a legacy value written by an older
-	// core) optimistically maps to provisioning: the resource exists and is
-	// presumed to be in flight.  A genuinely absent condition is handled above
-	// as pending, so this never surfaces an empty, non-enum status.
-	out := openapi.ResourceProvisioningStatusProvisioning
-
+	// The reason vocabulary is open (metav1.Condition uses a pattern, not an
+	// enum), so we classify each known reason by its coarse disposition. The
+	// Dependency* failure reasons split by whether they can self-heal: NotReady
+	// and Failed are yields that project to provisioning (still in flight),
+	// NotFound is terminal and projects to error. Anything we do not recognise —
+	// a legacy value from an older core, or a newer reason a producer added that
+	// this reader predates — falls through to the optimistic provisioning default
+	// (the resource exists and is presumed in flight; a genuinely absent condition
+	// is handled above as pending, so we never surface an empty, non-enum status),
+	// and we warn so an operator can spot a reason the projection has not caught up
+	// with rather than a silent permanent spinner.
 	switch condition.Reason {
 	case unikornv1.ConditionReasonProvisioning:
-		out = openapi.ResourceProvisioningStatusProvisioning
+		return openapi.ResourceProvisioningStatusProvisioning
 	case unikornv1.ConditionReasonProvisioned:
-		out = openapi.ResourceProvisioningStatusProvisioned
-	case unikornv1.ConditionReasonErrored:
-		out = openapi.ResourceProvisioningStatusError
+		return openapi.ResourceProvisioningStatusProvisioned
+	case unikornv1.ConditionReasonErrored, unikornv1.ConditionReasonDependencyNotFound:
+		return openapi.ResourceProvisioningStatusError
 	case unikornv1.ConditionReasonDeprovisioned, unikornv1.ConditionReasonDeprovisioning:
-		out = openapi.ResourceProvisioningStatusDeprovisioning
+		return openapi.ResourceProvisioningStatusDeprovisioning
+	case unikornv1.ConditionReasonDependencyNotReady, unikornv1.ConditionReasonDependencyFailed:
+		return openapi.ResourceProvisioningStatusProvisioning
 	}
 
-	return out
+	log.Log.Info("unrecognised provisioning condition reason; defaulting to provisioning status",
+		"reason", condition.Reason, "resource", in.GetName())
+
+	return openapi.ResourceProvisioningStatusProvisioning
 }
 
 // convertHealthCondition translates from Kubernetes heath conditions to API ones.

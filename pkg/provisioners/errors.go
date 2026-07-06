@@ -21,6 +21,13 @@ package provisioners
 import (
 	"errors"
 	"fmt"
+
+	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
+	"github.com/unikorn-cloud/core/pkg/constants"
+
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -72,51 +79,53 @@ var (
 	ErrUserActionRequired = errors.New("provisioning requires user action")
 )
 
-// Error is a provisioning error that carries an explicit, structured why
-// alongside its disposition.
+// Error is a provisioning error that pairs a disposition with a user-safe,
+// machine-classifiable surface.
 //
-// WHY: the manager funnels every provisioner error through a single condition
-// message, and the default path stringifies the raw error into user-visible
-// text — a fail-open leak of internal detail (CWE-209). At the same time, an
-// operator reading logs wants exactly that detail. One free-text field cannot
-// honestly serve both audiences. This type separates the three things that
-// actually matter:
+// The manager funnels every provisioner error through a single condition
+// message. Stringifying a raw error there is a fail-open leak of internal detail
+// (CWE-209); at the same time, a bare code is unhelpful to the human reading it.
+// Error separates the pieces that serve the different audiences:
 //
 //   - disposition: the machine-switchable outcome (ErrTerminal,
-//     ErrUserActionRequired, ErrYield, ...), exposed via Unwrap so errors.Is
-//     keeps working. Disposition lives in the type system, never in prose.
-//   - reason: a short, stable code (e.g. "insufficient_capacity",
-//     "invalid_flavor") suitable for mapping to a closed user-facing
-//     vocabulary later, without re-parsing strings.
-//   - why: an operator-facing detail string for logs and debugging. It is NOT
-//     intended to reach the user verbatim; routing it to a user surface is a
-//     deliberate, separate decision.
+//     ErrUserActionRequired, ErrYield), exposed via Unwrap so errors.Is keeps
+//     working. Lives in the type system, never in prose.
+//   - reason: a closed-vocabulary ProvisioningConditionReason, machine-classifiable
+//     and written straight onto the Available condition's Reason field, e.g.
+//     DependencyFailed.
+//   - message: user-safe human detail, written onto the condition's Message
+//     field, e.g. Network "prod-net" (a1b2) is not ready. It IS shown to the
+//     user, so it must be safe — name the user's own resources, never internal
+//     topology.
 //
-// The quick win it buys today, with no wiring: Error() embeds the why, so the
-// existing log.Error(err, ...) call in the manager logs the reason and why for
-// free — you get useful operator logs the moment a provisioner returns one of
-// these, well before any condition-surfacing work lands.
+// The manager surfaces reason and message directly onto the condition via
+// SetProvisioningCondition (see Reason/Message); there is no flattening into a
+// single string. Genuinely operator-only detail (provider internals, raw
+// upstream errors) does NOT go in message: wrap the Error with fmt.Errorf
+// instead. Error() embeds the wrapping for logs, and the manager's errors.As
+// recovers the typed reason/message so the unsafe wrapping never reaches the
+// user surface.
 type Error struct {
 	// disposition is the sentinel this error unwraps to (terminal, yield, ...).
 	disposition error
-	// reason is a short stable code identifying the failure class.
-	reason string
-	// why is operator-facing detail; safe for logs, not for users.
-	why string
+	// reason is the closed-vocabulary provisioning condition reason.
+	reason unikornv1.ProvisioningConditionReason
+	// message is user-safe human detail, surfaced as the condition message.
+	message string
 }
 
-func newError(disposition error, reason, why string) *Error {
-	return &Error{disposition: disposition, reason: reason, why: why}
+func newError(disposition error, reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return &Error{disposition: disposition, reason: reason, message: message}
 }
 
-// Error implements the error interface. The why is included so existing,
-// unmodified logging surfaces it without any extra plumbing.
+// Error implements the error interface, embedding the reason and message so
+// existing, unmodified logging surfaces them for free.
 func (e *Error) Error() string {
-	if e.why == "" {
+	if e.message == "" {
 		return fmt.Sprintf("%s: %s", e.disposition, e.reason)
 	}
 
-	return fmt.Sprintf("%s: %s: %s", e.disposition, e.reason, e.why)
+	return fmt.Sprintf("%s: %s: %s", e.disposition, e.reason, e.message)
 }
 
 // Unwrap exposes the disposition sentinel so callers can branch with
@@ -125,38 +134,83 @@ func (e *Error) Unwrap() error {
 	return e.disposition
 }
 
-// Reason returns the short stable failure code.
-func (e *Error) Reason() string {
+// Reason returns the closed-vocabulary provisioning reason to write onto the
+// Available condition's Reason field.
+func (e *Error) Reason() unikornv1.ProvisioningConditionReason {
 	return e.reason
 }
 
-// Why returns the operator-facing detail. Treat as log-safe, not user-safe.
-func (e *Error) Why() string {
-	return e.why
+// Message returns the user-safe human detail to write onto the condition's
+// Message field.
+func (e *Error) Message() string {
+	return e.message
 }
 
 // Terminal returns an ErrTerminal-dispositioned error: permanent, operator-only
 // recovery. See ErrTerminal.
-func Terminal(reason, why string) *Error {
-	return newError(ErrTerminal, reason, why)
+func Terminal(reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return newError(ErrTerminal, reason, message)
 }
 
 // UserActionRequired returns an ErrUserActionRequired-dispositioned error:
 // terminal until the user changes the spec. See ErrUserActionRequired.
-func UserActionRequired(reason, why string) *Error {
-	return newError(ErrUserActionRequired, reason, why)
+func UserActionRequired(reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return newError(ErrUserActionRequired, reason, message)
 }
 
-// Blocked returns a yield-dispositioned error that names the dependency being
-// waited on.
+// Yield returns an ErrYield-dispositioned error carrying a reason code and
+// user-safe message while still requeuing. It is the ErrYield sibling of Terminal
+// and UserActionRequired.
+func Yield(reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return newError(ErrYield, reason, message)
+}
+
+// describeResource renders a stable identifier for a resource for use in a
+// dependency Error's message: the Kind (from the scheme's GVK), the display name
+// (a point-in-time label value, mutable), and the durable id (the object name).
+// The id is the anchor; the name is a convenience that may have changed since.
 //
-// WHY: dependency waits currently collapse into a single opaque "Provisioning"
-// state — you cannot tell a resource that is doing work from one parked on a
-// dependency. Blocked still requeues (it unwraps to ErrYield), but records which
-// resource is the blocker. The kind/id is the user's own resource, so it is safe
-// to surface, and it makes the wait self-explanatory in logs immediately.
-func Blocked(kind, id string) *Error {
-	return newError(ErrYield, "dependency_not_ready", fmt.Sprintf("%s/%s", kind, id))
+//	Network "my-prod-net" (a1b2c3d4-...)
+//
+// If the name label is absent — the object was never fetched, or has been
+// deleted — only the Kind and id are rendered. All of this is the user's own
+// resource, hence safe to surface.
+func describeResource(scheme *runtime.Scheme, o client.Object) string {
+	kind := "resource"
+
+	if gvks, _, err := scheme.ObjectKinds(o); err == nil && len(gvks) > 0 {
+		kind = gvks[0].Kind
+	}
+
+	id := o.GetName()
+
+	name := o.GetLabels()[constants.NameLabel]
+	if name == "" {
+		return fmt.Sprintf("%s %s", kind, id)
+	}
+
+	return fmt.Sprintf("%s %q (%s)", kind, name, id)
+}
+
+// DependencyNotReady is the sanctioned way to signal a wait on a dependency that
+// exists but is not yet provisioned. It binds the reason, the yield disposition,
+// and a safe description together so a caller cannot mis-pair them.
+func DependencyNotReady(scheme *runtime.Scheme, o client.Object) *Error {
+	return Yield(unikornv1.ConditionReasonDependencyNotReady, describeResource(scheme, o)+" is not ready")
+}
+
+// DependencyFailed signals a wait on a dependency that is itself in an error
+// state. It still yields (the dependency may recover), but names the failure so
+// the wait is not mistaken for progress.
+func DependencyFailed(scheme *runtime.Scheme, o client.Object) *Error {
+	return Yield(unikornv1.ConditionReasonDependencyFailed, describeResource(scheme, o)+" has failed")
+}
+
+// DependencyNotFound signals a referenced dependency that does not exist. It is
+// terminal: waiting cannot resolve it. A referenced, finalized dependency that is
+// nonetheless gone is a consistency violation, not a transient wait.
+func DependencyNotFound(scheme *runtime.Scheme, o client.Object) *Error {
+	return Terminal(unikornv1.ConditionReasonDependencyNotFound, describeResource(scheme, o)+" does not exist")
 }
 
 // IsTerminal reports whether an error is a terminal provisioning disposition,

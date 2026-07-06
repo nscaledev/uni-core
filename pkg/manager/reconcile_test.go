@@ -234,6 +234,56 @@ func TestReconcileCreateYield(t *testing.T) {
 	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonProvisioning)
 }
 
+// TestReconcileCreateYieldReason tests that a typed yield surfaces its
+// closed-vocabulary reason on the Available condition's Reason field (rather than
+// the bare Provisioning lifecycle default) with the safe detail as the Message,
+// while still being requeued.
+func TestReconcileCreateYieldReason(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	const (
+		reason = unikornv1.ConditionReasonDependencyNotReady
+		detail = `Network "prod-net" (a1b2c3) is not ready`
+	)
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Yield(reason, detail))
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	// A yield is still requeued on the fixed timeout, not parked.
+	assert.NotZero(t, result.RequeueAfter)
+
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+
+	// The typed reason lands on the condition Reason (not the Provisioning
+	// lifecycle default) and the safe detail is the Message, unflattened.
+	mustAssertStatus(t, &resource, corev1.ConditionFalse, reason)
+
+	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
+	assert.NoError(t, err)
+	assert.Equal(t, detail, condition.Message)
+}
+
 // TestReconcileCreateCancelled tests resource creation and the status when the context
 // is cancelled.
 func TestReconcileCreateCancelled(t *testing.T) {
@@ -328,13 +378,13 @@ func TestReconcileCreateTerminal(t *testing.T) {
 	ctx := t.Context()
 
 	const (
-		reason = "invalid_flavor"
-		why    = "openstack flavor m1.bananas not found on host compute-7"
+		reason  = unikornv1.ConditionReasonDependencyNotFound
+		message = "the requested flavor is unavailable"
 	)
 
 	p := mockprovisioners.NewMockManagerProvisioner(c)
 	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
-	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Terminal(reason, why))
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Terminal(reason, message))
 
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
 
@@ -350,14 +400,14 @@ func TestReconcileCreateTerminal(t *testing.T) {
 
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
 	assert.Contains(t, resource.Finalizers, constants.Finalizer)
-	mustAssertStatus(t, &resource, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
 
-	// The user-visible message carries the closed-vocabulary reason, never the
-	// operator-only why.
+	// The typed reason lands on the condition Reason and the safe detail is the
+	// Message, unflattened.
+	mustAssertStatus(t, &resource, corev1.ConditionFalse, reason)
+
 	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
 	assert.NoError(t, err)
-	assert.Equal(t, reason, condition.Message)
-	assert.NotContains(t, condition.Message, why)
+	assert.Equal(t, message, condition.Message)
 }
 
 // TestReconcileCreateTerminalWrapped tests the interesting leak path: a terminal
@@ -382,12 +432,12 @@ func TestReconcileCreateTerminalWrapped(t *testing.T) {
 	ctx := t.Context()
 
 	const (
-		reason     = "invalid_flavor"
-		why        = "openstack flavor m1.bananas not found on host compute-7"
+		reason     = unikornv1.ConditionReasonDependencyNotFound
+		message    = "the requested flavor is unavailable"
 		outerProse = "internal scheduler at 10.0.0.1 blew up"
 	)
 
-	wrapped := fmt.Errorf("%s: %w", outerProse, provisioners.Terminal(reason, why))
+	wrapped := fmt.Errorf("%s: %w", outerProse, provisioners.Terminal(reason, message))
 
 	p := mockprovisioners.NewMockManagerProvisioner(c)
 	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
@@ -405,15 +455,15 @@ func TestReconcileCreateTerminalWrapped(t *testing.T) {
 	var resource unikornv1fake.ManagedResource
 
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
-	mustAssertStatus(t, &resource, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
 
-	// errors.As must strip the outer prose: the message is the reason code only,
-	// with neither the wrapping text nor the operator-only why.
+	// errors.As sees through the wrapping: the safe typed reason and message
+	// surface, and the unsafe outer prose is stripped off.
+	mustAssertStatus(t, &resource, corev1.ConditionFalse, reason)
+
 	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
 	assert.NoError(t, err)
-	assert.Equal(t, reason, condition.Message)
+	assert.Equal(t, message, condition.Message)
 	assert.NotContains(t, condition.Message, outerProse)
-	assert.NotContains(t, condition.Message, why)
 }
 
 // TestReconcileDelete checks that a resource marked as being deleted has the
