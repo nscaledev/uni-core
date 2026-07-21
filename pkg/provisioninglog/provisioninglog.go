@@ -14,13 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package provisioninglog emits a structured, tenant-scoped stream of
-// provisioning-status transitions. It mirrors the identity audit-log pattern —
-// the discriminator is the structured-log message (filter on
-// msg == "provisioning"), the payload is typed structs as key/values — but is
-// cross-cutting: it is emitted from the reconcile path for every managed
-// resource, so it must be driven edge-triggered by the caller (emit only when a
-// condition actually changes, never on every poll).
+// Package provisioninglog emits structured, tenant-scoped streams of
+// condition-status transitions. It mirrors the identity audit-log pattern — the
+// discriminator is the structured-log message, the payload is typed structs as
+// key/values — but is cross-cutting: it is driven edge-triggered by the caller
+// (emit only when a condition actually changes, never on every poll).
+//
+// Each condition axis is its own stream with its own message discriminator so a
+// pipeline can subscribe per axis (filter on msg == "provisioning" for the
+// Available/provisioning axis, msg == "lifecycle" for the Active/lifecycle-power
+// axis). The envelope is otherwise identical across streams, so every axis has
+// parity: same component/resource/scope/observedGeneration and the same payload
+// shape, keyed by the stream name.
 package provisioninglog
 
 import (
@@ -34,10 +39,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// discriminator is the structured-log message that marks a provisioning event, in
-// the same way identity's audit middleware uses the message "audit". A log
-// pipeline filters the stream on msg == "provisioning".
-const discriminator = "provisioning"
+// A Stream is the structured-log message that marks a condition-transition event,
+// in the same way identity's audit middleware uses the message "audit". A log
+// pipeline filters a stream on msg == the chosen value. The stream name doubles
+// as the payload key, so each axis carries its transition under its own key.
+const (
+	// StreamProvisioning carries Available-condition (provisioning) transitions.
+	StreamProvisioning = "provisioning"
+	// StreamLifecycle carries Active-condition (lifecycle/power) transitions.
+	StreamLifecycle = "lifecycle"
+)
 
 // scopeLabels maps the envelope's scope keys to the platform label keys they are
 // sourced from. It is deliberately a present-only projection of whatever tenancy
@@ -65,18 +76,22 @@ type Resource struct {
 	ID   string `json:"id"`
 }
 
-// Provisioning carries the transition itself: the Available condition's status,
-// its closed-vocabulary reason, and the user-safe message (the "why").
-type Provisioning struct {
+// Transition carries the condition change itself: the condition's status, its
+// reason, and the user-safe message (the "why"). It is shared across streams so
+// every axis has the same payload shape (parity).
+type Transition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message,omitempty"`
 }
 
-// Emit writes a single provisioning-transition event. The caller is responsible
-// for edge-triggering — only calling Emit when the (status, reason, message)
-// tuple has actually changed — since the reconcile path runs on every poll.
-func Emit(ctx context.Context, scheme *runtime.Scheme, object client.Object, status, reason, message string) {
+// Emit writes a single condition-transition event to the named stream (use one of
+// the Stream* discriminators). The caller is responsible for edge-triggering —
+// only calling Emit when the (status, reason, message) tuple has actually changed
+// — since the reconcile and monitor paths run on every poll. The stream name is
+// both the message discriminator and the key its transition payload is logged
+// under, so consumers of one axis are never confused by another's.
+func Emit(ctx context.Context, scheme *runtime.Scheme, object client.Object, stream, status, reason, message string) {
 	var kind, group string
 
 	if gvks, _, err := scheme.ObjectKinds(object); err == nil && len(gvks) > 0 {
@@ -94,7 +109,7 @@ func Emit(ctx context.Context, scheme *runtime.Scheme, object client.Object, sta
 		}
 	}
 
-	log.FromContext(ctx).Info(discriminator,
+	log.FromContext(ctx).Info(stream,
 		"component", &Component{
 			Name: group,
 		},
@@ -103,7 +118,7 @@ func Emit(ctx context.Context, scheme *runtime.Scheme, object client.Object, sta
 			ID:   object.GetName(),
 		},
 		"scope", scope,
-		"provisioning", &Provisioning{
+		stream, &Transition{
 			Status:  status,
 			Reason:  reason,
 			Message: message,

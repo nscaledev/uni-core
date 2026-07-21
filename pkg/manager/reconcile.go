@@ -388,7 +388,7 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// the stream reflects committed state (and a failed update simply retries and
 	// re-evaluates the edge next reconcile).
 	if changed {
-		provisioninglog.Emit(ctx, r.manager.GetScheme(), object, string(status), string(reason), message)
+		provisioninglog.Emit(ctx, r.manager.GetScheme(), object, provisioninglog.StreamProvisioning, string(status), string(reason), message)
 	}
 
 	return nil
