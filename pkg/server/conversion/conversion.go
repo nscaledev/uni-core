@@ -120,17 +120,63 @@ func convertHealthCondition(in metav1.Object) openapi.ResourceHealthStatus {
 	return out
 }
 
+// convertProvisioningStatusDetail projects the resource's Available condition into
+// the API provisioning detail: the closed-vocabulary reason and the user-safe
+// message. It supplements the coarse provisioningStatus with the "why", is derived
+// read-time (never stored), and returns nil — so the field is omitted — when the
+// resource carries no Available condition yet.
+func convertProvisioningStatusDetail(in metav1.Object) *openapi.ProvisioningStatusDetail {
+	reader, ok := in.(unikornv1.StatusConditionReader)
+	if !ok {
+		return nil
+	}
+
+	condition, err := unikornv1.GetAvailableCondition(reader)
+	if err != nil {
+		return nil
+	}
+
+	return &openapi.ProvisioningStatusDetail{
+		Reason:  openapi.ProvisioningStatusReason(condition.Reason),
+		Message: condition.Message,
+	}
+}
+
+// convertHealthStatusDetail projects the resource's Healthy condition into the API
+// health detail: the closed-vocabulary reason and the user-safe message (the
+// "why", e.g. "2/12 nodes are down"). It supplements the coarse healthStatus, is
+// derived read-time (never stored), and returns nil — so the field is omitted —
+// when the resource carries no Healthy condition yet.
+func convertHealthStatusDetail(in metav1.Object) *openapi.HealthStatusDetail {
+	reader, ok := in.(unikornv1.StatusConditionReader)
+	if !ok {
+		return nil
+	}
+
+	condition, err := unikornv1.GetHealthyCondition(reader)
+	if err != nil {
+		return nil
+	}
+
+	return &openapi.HealthStatusDetail{
+		Reason:  openapi.HealthStatusReason(condition.Reason),
+		Message: condition.Message,
+	}
+}
+
 // ResourceReadMetadata extracts generic metadata from a resource for GET APIs.
 func ResourceReadMetadata(in metav1.Object, tags unikornv1.TagList) openapi.ResourceReadMetadata {
 	labels := in.GetLabels()
 	annotations := in.GetAnnotations()
 
 	out := openapi.ResourceReadMetadata{
-		Id:                 in.GetName(),
-		Name:               labels[constants.NameLabel],
-		CreationTime:       in.GetCreationTimestamp().Time,
-		ProvisioningStatus: convertStatusCondition(in),
-		HealthStatus:       convertHealthCondition(in),
+		Id:                       in.GetName(),
+		Name:                     labels[constants.NameLabel],
+		CreationTime:             in.GetCreationTimestamp().Time,
+		ProvisioningStatus:       convertStatusCondition(in),
+		ProvisioningStatusDetail: convertProvisioningStatusDetail(in),
+		HealthStatus:             convertHealthCondition(in),
+		HealthStatusDetail:       convertHealthStatusDetail(in),
 	}
 
 	if v, ok := annotations[constants.DescriptionAnnotation]; ok {

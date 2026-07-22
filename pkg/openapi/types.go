@@ -28,6 +28,25 @@ const (
 	UnsupportedMediaType  ErrorError = "unsupported_media_type"
 )
 
+// Defines values for HealthStatusReason.
+const (
+	HealthStatusReasonDegraded HealthStatusReason = "Degraded"
+	HealthStatusReasonHealthy  HealthStatusReason = "Healthy"
+	HealthStatusReasonUnknown  HealthStatusReason = "Unknown"
+)
+
+// Defines values for ProvisioningStatusReason.
+const (
+	ProvisioningStatusReasonDependencyFailed   ProvisioningStatusReason = "DependencyFailed"
+	ProvisioningStatusReasonDependencyNotFound ProvisioningStatusReason = "DependencyNotFound"
+	ProvisioningStatusReasonDependencyNotReady ProvisioningStatusReason = "DependencyNotReady"
+	ProvisioningStatusReasonDeprovisioned      ProvisioningStatusReason = "Deprovisioned"
+	ProvisioningStatusReasonDeprovisioning     ProvisioningStatusReason = "Deprovisioning"
+	ProvisioningStatusReasonErrored            ProvisioningStatusReason = "Errored"
+	ProvisioningStatusReasonProvisioned        ProvisioningStatusReason = "Provisioned"
+	ProvisioningStatusReasonProvisioning       ProvisioningStatusReason = "Provisioning"
+)
+
 // Defines values for ResourceHealthStatus.
 const (
 	ResourceHealthStatusDegraded ResourceHealthStatus = "degraded"
@@ -68,6 +87,25 @@ type Error struct {
 
 // ErrorError A terse error string expanding on the HTTP error code. Errors are based on the OAuth 2.02 specification, but are expanded with proprietary status codes for APIs other than those specified by OAuth 2.02.
 type ErrorError string
+
+// HealthStatusDetail Human-facing detail about the current health state: a machine-classifiable
+// reason drawn from a closed vocabulary, and a user-safe human-readable
+// message (e.g. "2/12 nodes are down"). Derived from the resource's status and
+// supplements the coarse healthStatus; never stored.
+type HealthStatusDetail struct {
+	// Message A user-safe, human-readable description of the health state.
+	Message string `json:"message"`
+
+	// Reason A closed, generic classification of a resource's health — the raw health
+	// condition reason, finer-grained than the coarse healthStatus. Owned by the
+	// platform and the same across all resources.
+	Reason HealthStatusReason `json:"reason"`
+}
+
+// HealthStatusReason A closed, generic classification of a resource's health — the raw health
+// condition reason, finer-grained than the coarse healthStatus. Owned by the
+// platform and the same across all resources.
+type HealthStatusReason string
 
 // KubernetesLabelValue A valid Kubernetes label value, typically used for resource names that can be
 // indexed in the database.
@@ -112,6 +150,12 @@ type OrganizationScopedResourceReadMetadata struct {
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
 
+	// HealthStatusDetail Human-facing detail about the current health state: a machine-classifiable
+	// reason drawn from a closed vocabulary, and a user-safe human-readable
+	// message (e.g. "2/12 nodes are down"). Derived from the resource's status and
+	// supplements the coarse healthStatus; never stored.
+	HealthStatusDetail *HealthStatusDetail `json:"healthStatusDetail,omitempty"`
+
 	// Id The unique resource ID.
 	Id string `json:"id"`
 
@@ -130,6 +174,12 @@ type OrganizationScopedResourceReadMetadata struct {
 
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
+
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
 
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
@@ -151,6 +201,12 @@ type ProjectScopedResourceReadMetadata struct {
 
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
+
+	// HealthStatusDetail Human-facing detail about the current health state: a machine-classifiable
+	// reason drawn from a closed vocabulary, and a user-safe human-readable
+	// message (e.g. "2/12 nodes are down"). Derived from the resource's status and
+	// supplements the coarse healthStatus; never stored.
+	HealthStatusDetail *HealthStatusDetail `json:"healthStatusDetail,omitempty"`
 
 	// Id The unique resource ID.
 	Id string `json:"id"`
@@ -174,9 +230,38 @@ type ProjectScopedResourceReadMetadata struct {
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
 
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
+
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
 }
+
+// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+// machine-classifiable reason drawn from a closed vocabulary, and a
+// user-safe human-readable message. Derived from the resource's status and
+// supplements the coarse provisioningStatus; never stored.
+type ProvisioningStatusDetail struct {
+	// Message A user-safe, human-readable description of the provisioning state.
+	Message string `json:"message"`
+
+	// Reason A closed, generic classification of a resource's provisioning state,
+	// finer-grained than provisioningStatus. This vocabulary is owned by the
+	// platform and is the same across all resources; domain-specific state
+	// (e.g. an instance's lifecycle phase) is carried on other mechanisms and
+	// never appears here.
+	Reason ProvisioningStatusReason `json:"reason"`
+}
+
+// ProvisioningStatusReason A closed, generic classification of a resource's provisioning state,
+// finer-grained than provisioningStatus. This vocabulary is owned by the
+// platform and is the same across all resources; domain-specific state
+// (e.g. an instance's lifecycle phase) is carried on other mechanisms and
+// never appears here.
+type ProvisioningStatusReason string
 
 // ResourceHealthStatus The health state of a resource.
 type ResourceHealthStatus string
@@ -214,6 +299,12 @@ type ResourceReadMetadata struct {
 	// HealthStatus The health state of a resource.
 	HealthStatus ResourceHealthStatus `json:"healthStatus"`
 
+	// HealthStatusDetail Human-facing detail about the current health state: a machine-classifiable
+	// reason drawn from a closed vocabulary, and a user-safe human-readable
+	// message (e.g. "2/12 nodes are down"). Derived from the resource's status and
+	// supplements the coarse healthStatus; never stored.
+	HealthStatusDetail *HealthStatusDetail `json:"healthStatusDetail,omitempty"`
+
 	// Id The unique resource ID.
 	Id string `json:"id"`
 
@@ -229,6 +320,12 @@ type ResourceReadMetadata struct {
 
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
+
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
 
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
