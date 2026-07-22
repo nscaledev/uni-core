@@ -45,6 +45,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,6 +72,7 @@ func TestMain(m *testing.M) {
 // testContext provides a common framework for test execution.
 type testContext struct {
 	client client.Client
+	scheme *runtime.Scheme
 }
 
 func mustNewTestContext(t *testing.T, objects ...client.Object) *testContext {
@@ -83,6 +85,7 @@ func mustNewTestContext(t *testing.T, objects ...client.Object) *testContext {
 
 	tc := &testContext{
 		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}).WithObjects(objects...).Build(),
+		scheme: scheme,
 	}
 
 	return tc
@@ -110,6 +113,7 @@ func (tc *testContext) newManager(c *gomock.Controller) crmanager.Manager {
 	m := mockmanager.NewMockManager(c)
 
 	m.EXPECT().GetClient().Return(tc.client).AnyTimes()
+	m.EXPECT().GetScheme().Return(tc.scheme).AnyTimes()
 
 	return m
 }

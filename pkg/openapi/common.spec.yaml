@@ -164,6 +164,65 @@ components:
       - healthy
       - degraded
       - error
+    provisioningStatusReason:
+      description: |-
+        A closed, generic classification of a resource's provisioning state,
+        finer-grained than provisioningStatus. This vocabulary is owned by the
+        platform and is the same across all resources; domain-specific state
+        (e.g. an instance's lifecycle phase) is carried on other mechanisms and
+        never appears here.
+      type: string
+      enum:
+      - Provisioning
+      - Provisioned
+      - Errored
+      - Deprovisioning
+      - Deprovisioned
+      - DependencyNotReady
+      - DependencyFailed
+      - DependencyNotFound
+    provisioningStatusDetail:
+      description: |-
+        Human-facing detail about the current provisioning state: a
+        machine-classifiable reason drawn from a closed vocabulary, and a
+        user-safe human-readable message. Derived from the resource's status and
+        supplements the coarse provisioningStatus; never stored.
+      type: object
+      required:
+      - reason
+      - message
+      properties:
+        reason:
+          $ref: '#/components/schemas/provisioningStatusReason'
+        message:
+          description: A user-safe, human-readable description of the provisioning state.
+          type: string
+    healthStatusReason:
+      description: |-
+        A closed, generic classification of a resource's health — the raw health
+        condition reason, finer-grained than the coarse healthStatus. Owned by the
+        platform and the same across all resources.
+      type: string
+      enum:
+      - Healthy
+      - Degraded
+      - Unknown
+    healthStatusDetail:
+      description: |-
+        Human-facing detail about the current health state: a machine-classifiable
+        reason drawn from a closed vocabulary, and a user-safe human-readable
+        message (e.g. "2/12 nodes are down"). Derived from the resource's status and
+        supplements the coarse healthStatus; never stored.
+      type: object
+      required:
+      - reason
+      - message
+      properties:
+        reason:
+          $ref: '#/components/schemas/healthStatusReason'
+        message:
+          description: A user-safe, human-readable description of the health state.
+          type: string
     resourceReadMetadata:
       description: Metadata required by all resource reads.
       allOf:
@@ -179,8 +238,12 @@ components:
             format: date-time
           provisioningStatus:
             $ref: '#/components/schemas/resourceProvisioningStatus'
+          provisioningStatusDetail:
+            $ref: '#/components/schemas/provisioningStatusDetail'
           healthStatus:
             $ref: '#/components/schemas/resourceHealthStatus'
+          healthStatusDetail:
+            $ref: '#/components/schemas/healthStatusDetail'
     organizationScopedResourceReadMetadata:
       description: Metadata required by organization scoped resource reads.
       allOf:
