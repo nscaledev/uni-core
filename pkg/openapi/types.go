@@ -28,6 +28,18 @@ const (
 	UnsupportedMediaType  ErrorError = "unsupported_media_type"
 )
 
+// Defines values for ProvisioningStatusReason.
+const (
+	ProvisioningStatusReasonDependencyFailed   ProvisioningStatusReason = "DependencyFailed"
+	ProvisioningStatusReasonDependencyNotFound ProvisioningStatusReason = "DependencyNotFound"
+	ProvisioningStatusReasonDependencyNotReady ProvisioningStatusReason = "DependencyNotReady"
+	ProvisioningStatusReasonDeprovisioned      ProvisioningStatusReason = "Deprovisioned"
+	ProvisioningStatusReasonDeprovisioning     ProvisioningStatusReason = "Deprovisioning"
+	ProvisioningStatusReasonErrored            ProvisioningStatusReason = "Errored"
+	ProvisioningStatusReasonProvisioned        ProvisioningStatusReason = "Provisioned"
+	ProvisioningStatusReasonProvisioning       ProvisioningStatusReason = "Provisioning"
+)
+
 // Defines values for ResourceHealthStatus.
 const (
 	ResourceHealthStatusDegraded ResourceHealthStatus = "degraded"
@@ -131,6 +143,12 @@ type OrganizationScopedResourceReadMetadata struct {
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
 
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
+
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
 }
@@ -174,9 +192,38 @@ type ProjectScopedResourceReadMetadata struct {
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
 
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
+
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`
 }
+
+// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+// machine-classifiable reason drawn from a closed vocabulary, and a
+// user-safe human-readable message. Derived from the resource's status and
+// supplements the coarse provisioningStatus; never stored.
+type ProvisioningStatusDetail struct {
+	// Message A user-safe, human-readable description of the provisioning state.
+	Message string `json:"message"`
+
+	// Reason A closed, generic classification of a resource's provisioning state,
+	// finer-grained than provisioningStatus. This vocabulary is owned by the
+	// platform and is the same across all resources; domain-specific state
+	// (e.g. an instance's lifecycle phase) is carried on other mechanisms and
+	// never appears here.
+	Reason ProvisioningStatusReason `json:"reason"`
+}
+
+// ProvisioningStatusReason A closed, generic classification of a resource's provisioning state,
+// finer-grained than provisioningStatus. This vocabulary is owned by the
+// platform and is the same across all resources; domain-specific state
+// (e.g. an instance's lifecycle phase) is carried on other mechanisms and
+// never appears here.
+type ProvisioningStatusReason string
 
 // ResourceHealthStatus The health state of a resource.
 type ResourceHealthStatus string
@@ -229,6 +276,12 @@ type ResourceReadMetadata struct {
 
 	// ProvisioningStatus The provisioning state of a resource.
 	ProvisioningStatus ResourceProvisioningStatus `json:"provisioningStatus"`
+
+	// ProvisioningStatusDetail Human-facing detail about the current provisioning state: a
+	// machine-classifiable reason drawn from a closed vocabulary, and a
+	// user-safe human-readable message. Derived from the resource's status and
+	// supplements the coarse provisioningStatus; never stored.
+	ProvisioningStatusDetail *ProvisioningStatusDetail `json:"provisioningStatusDetail,omitempty"`
 
 	// Tags A list of tags.
 	Tags *TagList `json:"tags,omitempty"`

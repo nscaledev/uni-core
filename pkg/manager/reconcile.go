@@ -21,7 +21,6 @@ package manager
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -30,6 +29,7 @@ import (
 	"github.com/unikorn-cloud/core/pkg/constants"
 	coreerrors "github.com/unikorn-cloud/core/pkg/errors"
 	"github.com/unikorn-cloud/core/pkg/manager/options"
+	"github.com/unikorn-cloud/core/pkg/provisioninglog"
 	"github.com/unikorn-cloud/core/pkg/provisioners"
 	"github.com/unikorn-cloud/core/pkg/provisioners/application"
 
@@ -301,6 +301,11 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 
 	var message string
 
+	// Capture the prior Available condition so the provisioning log below can be
+	// edge-triggered: emit only when the (status, reason, message) tuple actually
+	// changes, never on every poll. Nil when there is no condition yet.
+	prior, _ := unikornv1.GetAvailableCondition(object)
+
 	// Phase 1: derive status and a lifecycle-default reason/message from the
 	// disposition. context.Canceled is the one outcome we deliberately do not
 	// record, leaving the existing condition untouched.
@@ -308,20 +313,20 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	case err == nil:
 		status = corev1.ConditionTrue
 		reason = unikornv1.ConditionReasonProvisioned
-		message = "Provisioned"
+		message = "provisioned"
 
 		if deprovision {
 			reason = unikornv1.ConditionReasonDeprovisioned
-			message = "Deprovisioned"
+			message = "deprovisioned"
 		}
 	case errors.Is(err, provisioners.ErrYield):
 		status = corev1.ConditionFalse
 		reason = unikornv1.ConditionReasonProvisioning
-		message = "Provisioning"
+		message = "provisioning"
 
 		if deprovision {
 			reason = unikornv1.ConditionReasonDeprovisioning
-			message = "Deprovisioning"
+			message = "deprovisioning"
 		}
 	case errors.Is(err, context.Canceled):
 		// Leave it as it is.
@@ -331,12 +336,18 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		// (ErrTerminal/ErrUserActionRequired), piggybacks on Errored: there is
 		// no observable distinction between a retrying and a terminal failure in
 		// the surfaced condition (the difference is purely in the requeue
-		// decision, see reconcileNormal). A bare error stringifies here as a
-		// last-resort fallback; the typed override below replaces it when the
-		// error carries a reason.
+		// decision, see reconcileNormal). The message is deliberately generic and
+		// fixed: this condition is user-visible - it is projected onto the API
+		// provisioningStatusDetail and emitted on the provisioning log stream - so
+		// an untyped error must never be stringified onto it (CWE-209). The typed
+		// override below replaces this with the error's user-safe Message() when
+		// it carries one; the raw error is left for reconcileNormal to log
+		// operator-side, never surfaced here. Messages are lowercase with no
+		// trailing punctuation, matching the Go error-string convention the rest
+		// of the codebase follows.
 		status = corev1.ConditionFalse
 		reason = unikornv1.ConditionReasonErrored
-		message = fmt.Sprintf("Unhandled error: %v", err)
+		message = "an unexpected error occurred"
 	}
 
 	// Phase 2: enrich. A typed provisioning error carries its own closed-vocabulary
@@ -361,10 +372,23 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		message = perr.Message()
 	}
 
+	// Edge: did this transition actually change the surfaced provisioning state?
+	changed := prior == nil ||
+		prior.Status != status ||
+		prior.Reason != reason ||
+		prior.Message != message
+
 	object.SetProvisioningCondition(status, reason, message)
 
 	if err := r.manager.GetClient().Status().Update(ctx, object); err != nil {
 		return err
+	}
+
+	// Emit the provisioning-transition log only once the change is persisted, so
+	// the stream reflects committed state (and a failed update simply retries and
+	// re-evaluates the edge next reconcile).
+	if changed {
+		provisioninglog.Emit(ctx, r.manager.GetScheme(), object, string(status), string(reason), message)
 	}
 
 	return nil
