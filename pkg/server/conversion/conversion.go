@@ -57,28 +57,33 @@ func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus
 	}
 
 	// No condition yet, it's pending.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionAvailable)
+	condition, err := unikornv1.GetAvailableCondition(reader)
 	if err != nil {
 		return openapi.ResourceProvisioningStatusPending
 	}
 
-	//nolint:exhaustive
+	// Any reason we don't recognise (e.g. a legacy value written by an older
+	// core) optimistically maps to provisioning: the resource exists and is
+	// presumed to be in flight.  A genuinely absent condition is handled above
+	// as pending, so this never surfaces an empty, non-enum status.
+	out := openapi.ResourceProvisioningStatusProvisioning
+
 	switch condition.Reason {
 	case unikornv1.ConditionReasonProvisioning:
-		return openapi.ResourceProvisioningStatusProvisioning
+		out = openapi.ResourceProvisioningStatusProvisioning
 	case unikornv1.ConditionReasonProvisioned:
-		return openapi.ResourceProvisioningStatusProvisioned
+		out = openapi.ResourceProvisioningStatusProvisioned
 	case unikornv1.ConditionReasonErrored:
-		return openapi.ResourceProvisioningStatusError
-	case unikornv1.ConditionReasonDeprovisioning:
-		return openapi.ResourceProvisioningStatusDeprovisioning
+		out = openapi.ResourceProvisioningStatusError
+	case unikornv1.ConditionReasonDeprovisioned, unikornv1.ConditionReasonDeprovisioning:
+		out = openapi.ResourceProvisioningStatusDeprovisioning
 	}
 
-	return openapi.ResourceProvisioningStatusUnknown
+	return out
 }
 
 // convertHealthCondition translates from Kubernetes heath conditions to API ones.
-func convertHealthCondition(in any) openapi.ResourceHealthStatus {
+func convertHealthCondition(in metav1.Object) openapi.ResourceHealthStatus {
 	// Not a resource with status conditions, consider it healthy.
 	reader, ok := in.(unikornv1.StatusConditionReader)
 	if !ok {
@@ -86,22 +91,23 @@ func convertHealthCondition(in any) openapi.ResourceHealthStatus {
 	}
 
 	// No condition yet, it's unknown.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionHealthy)
+	condition, err := unikornv1.GetHealthyCondition(reader)
 	if err != nil {
 		return openapi.ResourceHealthStatusUnknown
 	}
 
-	//nolint:exhaustive
+	var out openapi.ResourceHealthStatus
+
 	switch condition.Reason {
 	case unikornv1.ConditionReasonHealthy:
-		return openapi.ResourceHealthStatusHealthy
+		out = openapi.ResourceHealthStatusHealthy
 	case unikornv1.ConditionReasonDegraded:
-		return openapi.ResourceHealthStatusDegraded
-	case unikornv1.ConditionReasonErrored:
-		return openapi.ResourceHealthStatusError
+		out = openapi.ResourceHealthStatusDegraded
+	case unikornv1.ConditionReasonUnknown:
+		out = openapi.ResourceHealthStatusUnknown
 	}
 
-	return openapi.ResourceHealthStatusUnknown
+	return out
 }
 
 // ResourceReadMetadata extracts generic metadata from a resource for GET APIs.

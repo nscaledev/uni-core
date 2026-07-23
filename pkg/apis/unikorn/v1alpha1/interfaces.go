@@ -22,6 +22,7 @@ package v1alpha1
 
 import (
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,15 +49,21 @@ type ReconcilePauser interface {
 type StatusConditionReader interface {
 	// StatusConditionRead scans the status conditions for an existing condition
 	// whose type matches.
-	StatusConditionRead(t ConditionType) (*Condition, error)
+	StatusConditionRead(t ConditionType) (*metav1.Condition, error)
 }
 
-// StatusConditionWriter allows generic status conditions to be updated.
-type StatusConditionWriter interface {
-	// StatusConditionWrite either adds or updates a condition in the resource
-	// status. If the condition, status and message match an existing condition
-	// the update is ignored.
-	StatusConditionWrite(t ConditionType, status corev1.ConditionStatus, reason ConditionReason, message string)
+// ProvisioningConditionWriter sets the Available condition, with its reason
+// constrained to the provisioning vocabulary.  Every managed resource must
+// implement it; it is how the manager reports provisioning progress.
+type ProvisioningConditionWriter interface {
+	SetProvisioningCondition(status corev1.ConditionStatus, reason ProvisioningConditionReason, message string)
+}
+
+// HealthConditionWriter sets the Healthy condition, with its reason constrained
+// to the health vocabulary.  It is optional: only resources that compute a
+// health status implement it, and callers type-assert for it.
+type HealthConditionWriter interface {
+	SetHealthCondition(status corev1.ConditionStatus, reason HealthConditionReason, message string)
 }
 
 // ManagableResourceInterface is a resource type that can be manged e.g. has a
@@ -66,5 +73,5 @@ type ManagableResourceInterface interface {
 	ResourceLabeller
 	ReconcilePauser
 	StatusConditionReader
-	StatusConditionWriter
+	ProvisioningConditionWriter
 }

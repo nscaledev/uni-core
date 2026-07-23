@@ -71,7 +71,7 @@ func newBasicObject() *basicObject {
 	}
 }
 
-func (o *basicObject) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1.Condition, error) {
+func (o *basicObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
 	return nil, ErrAny
 }
 
@@ -100,8 +100,35 @@ func newAdvancedObject() *advancedObject {
 	}
 }
 
-func (o *advancedObject) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1.Condition, error) {
+func (o *advancedObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
 	return nil, ErrAny
+}
+
+// legacyReasonObject carries an Available condition whose reason is outside the
+// provisioning vocabulary, e.g. one written by an older core (such as the
+// retired Cancelled reason).
+type legacyReasonObject struct {
+	metav1.ObjectMeta
+}
+
+func newLegacyReasonObject() *legacyReasonObject {
+	return &legacyReasonObject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              id,
+			CreationTimestamp: metav1.Time{Time: creationTime},
+			Labels: map[string]string{
+				constants.NameLabel: name,
+			},
+		},
+	}
+}
+
+func (o *legacyReasonObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
+	return &metav1.Condition{
+		Type:   string(unikornv1.ConditionAvailable),
+		Status: metav1.ConditionFalse,
+		Reason: "Cancelled",
+	}, nil
 }
 
 func tags() unikornv1.TagList {
@@ -155,6 +182,18 @@ func TestResourceReadMetadataBasic(t *testing.T) {
 	require.Nil(t, out.ModifiedTime)
 	require.Nil(t, out.DeletionTime)
 	require.Nil(t, out.Tags)
+}
+
+// TestResourceReadMetadataUnknownReason checks that an Available reason outside the
+// provisioning vocabulary falls back to provisioning, never an invalid empty status.
+func TestResourceReadMetadataUnknownReason(t *testing.T) {
+	t.Parallel()
+
+	in := newLegacyReasonObject()
+
+	out := conversion.ResourceReadMetadata(in, nil)
+
+	require.Equal(t, openapi.ResourceProvisioningStatusProvisioning, out.ProvisioningStatus)
 }
 
 // TestResourceReadMetadataAdvanced checks that a maximizes input yields a maximized output.

@@ -22,6 +22,7 @@ import (
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -33,10 +34,10 @@ func (r *ManagedResource) Paused() bool {
 	return false
 }
 
-func (r *ManagedResource) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1.Condition, error) {
+func (r *ManagedResource) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
 	return unikornv1.GetCondition(r.Status.Conditions, t)
 }
 
-func (r *ManagedResource) StatusConditionWrite(t unikornv1.ConditionType, status corev1.ConditionStatus, reason unikornv1.ConditionReason, message string) {
-	unikornv1.UpdateCondition(&r.Status.Conditions, t, status, reason, message)
+func (r *ManagedResource) SetProvisioningCondition(status corev1.ConditionStatus, reason unikornv1.ProvisioningConditionReason, message string) {
+	unikornv1.UpdateCondition(&r.Status.Conditions, unikornv1.ConditionAvailable, status, string(reason), message)
 }

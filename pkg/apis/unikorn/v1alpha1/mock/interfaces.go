@@ -120,10 +120,10 @@ func (m *MockStatusConditionReader) EXPECT() *MockStatusConditionReaderMockRecor
 }
 
 // StatusConditionRead mocks base method.
-func (m *MockStatusConditionReader) StatusConditionRead(t v1alpha1.ConditionType) (*v1alpha1.Condition, error) {
+func (m *MockStatusConditionReader) StatusConditionRead(t v1alpha1.ConditionType) (*v10.Condition, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "StatusConditionRead", t)
-	ret0, _ := ret[0].(*v1alpha1.Condition)
+	ret0, _ := ret[0].(*v10.Condition)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -134,39 +134,74 @@ func (mr *MockStatusConditionReaderMockRecorder) StatusConditionRead(t any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatusConditionRead", reflect.TypeOf((*MockStatusConditionReader)(nil).StatusConditionRead), t)
 }
 
-// MockStatusConditionWriter is a mock of StatusConditionWriter interface.
-type MockStatusConditionWriter struct {
+// MockProvisioningConditionWriter is a mock of ProvisioningConditionWriter interface.
+type MockProvisioningConditionWriter struct {
 	ctrl     *gomock.Controller
-	recorder *MockStatusConditionWriterMockRecorder
+	recorder *MockProvisioningConditionWriterMockRecorder
 }
 
-// MockStatusConditionWriterMockRecorder is the mock recorder for MockStatusConditionWriter.
-type MockStatusConditionWriterMockRecorder struct {
-	mock *MockStatusConditionWriter
+// MockProvisioningConditionWriterMockRecorder is the mock recorder for MockProvisioningConditionWriter.
+type MockProvisioningConditionWriterMockRecorder struct {
+	mock *MockProvisioningConditionWriter
 }
 
-// NewMockStatusConditionWriter creates a new mock instance.
-func NewMockStatusConditionWriter(ctrl *gomock.Controller) *MockStatusConditionWriter {
-	mock := &MockStatusConditionWriter{ctrl: ctrl}
-	mock.recorder = &MockStatusConditionWriterMockRecorder{mock}
+// NewMockProvisioningConditionWriter creates a new mock instance.
+func NewMockProvisioningConditionWriter(ctrl *gomock.Controller) *MockProvisioningConditionWriter {
+	mock := &MockProvisioningConditionWriter{ctrl: ctrl}
+	mock.recorder = &MockProvisioningConditionWriterMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockStatusConditionWriter) EXPECT() *MockStatusConditionWriterMockRecorder {
+func (m *MockProvisioningConditionWriter) EXPECT() *MockProvisioningConditionWriterMockRecorder {
 	return m.recorder
 }
 
-// StatusConditionWrite mocks base method.
-func (m *MockStatusConditionWriter) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason v1alpha1.ConditionReason, message string) {
+// SetProvisioningCondition mocks base method.
+func (m *MockProvisioningConditionWriter) SetProvisioningCondition(status v1.ConditionStatus, reason v1alpha1.ProvisioningConditionReason, message string) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "StatusConditionWrite", t, status, reason, message)
+	m.ctrl.Call(m, "SetProvisioningCondition", status, reason, message)
 }
 
-// StatusConditionWrite indicates an expected call of StatusConditionWrite.
-func (mr *MockStatusConditionWriterMockRecorder) StatusConditionWrite(t, status, reason, message any) *gomock.Call {
+// SetProvisioningCondition indicates an expected call of SetProvisioningCondition.
+func (mr *MockProvisioningConditionWriterMockRecorder) SetProvisioningCondition(status, reason, message any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatusConditionWrite", reflect.TypeOf((*MockStatusConditionWriter)(nil).StatusConditionWrite), t, status, reason, message)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetProvisioningCondition", reflect.TypeOf((*MockProvisioningConditionWriter)(nil).SetProvisioningCondition), status, reason, message)
+}
+
+// MockHealthConditionWriter is a mock of HealthConditionWriter interface.
+type MockHealthConditionWriter struct {
+	ctrl     *gomock.Controller
+	recorder *MockHealthConditionWriterMockRecorder
+}
+
+// MockHealthConditionWriterMockRecorder is the mock recorder for MockHealthConditionWriter.
+type MockHealthConditionWriterMockRecorder struct {
+	mock *MockHealthConditionWriter
+}
+
+// NewMockHealthConditionWriter creates a new mock instance.
+func NewMockHealthConditionWriter(ctrl *gomock.Controller) *MockHealthConditionWriter {
+	mock := &MockHealthConditionWriter{ctrl: ctrl}
+	mock.recorder = &MockHealthConditionWriterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHealthConditionWriter) EXPECT() *MockHealthConditionWriterMockRecorder {
+	return m.recorder
+}
+
+// SetHealthCondition mocks base method.
+func (m *MockHealthConditionWriter) SetHealthCondition(status v1.ConditionStatus, reason v1alpha1.HealthConditionReason, message string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetHealthCondition", status, reason, message)
+}
+
+// SetHealthCondition indicates an expected call of SetHealthCondition.
+func (mr *MockHealthConditionWriterMockRecorder) SetHealthCondition(status, reason, message any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetHealthCondition", reflect.TypeOf((*MockHealthConditionWriter)(nil).SetHealthCondition), status, reason, message)
 }
 
 // MockManagableResourceInterface is a mock of ManagableResourceInterface interface.
@@ -603,6 +638,18 @@ func (mr *MockManagableResourceInterfaceMockRecorder) SetOwnerReferences(arg0 an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetOwnerReferences", reflect.TypeOf((*MockManagableResourceInterface)(nil).SetOwnerReferences), arg0)
 }
 
+// SetProvisioningCondition mocks base method.
+func (m *MockManagableResourceInterface) SetProvisioningCondition(status v1.ConditionStatus, reason v1alpha1.ProvisioningConditionReason, message string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetProvisioningCondition", status, reason, message)
+}
+
+// SetProvisioningCondition indicates an expected call of SetProvisioningCondition.
+func (mr *MockManagableResourceInterfaceMockRecorder) SetProvisioningCondition(status, reason, message any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetProvisioningCondition", reflect.TypeOf((*MockManagableResourceInterface)(nil).SetProvisioningCondition), status, reason, message)
+}
+
 // SetResourceVersion mocks base method.
 func (m *MockManagableResourceInterface) SetResourceVersion(version string) {
 	m.ctrl.T.Helper()
@@ -640,10 +687,10 @@ func (mr *MockManagableResourceInterfaceMockRecorder) SetUID(uid any) *gomock.Ca
 }
 
 // StatusConditionRead mocks base method.
-func (m *MockManagableResourceInterface) StatusConditionRead(t v1alpha1.ConditionType) (*v1alpha1.Condition, error) {
+func (m *MockManagableResourceInterface) StatusConditionRead(t v1alpha1.ConditionType) (*v10.Condition, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "StatusConditionRead", t)
-	ret0, _ := ret[0].(*v1alpha1.Condition)
+	ret0, _ := ret[0].(*v10.Condition)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -652,16 +699,4 @@ func (m *MockManagableResourceInterface) StatusConditionRead(t v1alpha1.Conditio
 func (mr *MockManagableResourceInterfaceMockRecorder) StatusConditionRead(t any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatusConditionRead", reflect.TypeOf((*MockManagableResourceInterface)(nil).StatusConditionRead), t)
-}
-
-// StatusConditionWrite mocks base method.
-func (m *MockManagableResourceInterface) StatusConditionWrite(t v1alpha1.ConditionType, status v1.ConditionStatus, reason v1alpha1.ConditionReason, message string) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "StatusConditionWrite", t, status, reason, message)
-}
-
-// StatusConditionWrite indicates an expected call of StatusConditionWrite.
-func (mr *MockManagableResourceInterfaceMockRecorder) StatusConditionWrite(t, status, reason, message any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatusConditionWrite", reflect.TypeOf((*MockManagableResourceInterface)(nil).StatusConditionWrite), t, status, reason, message)
 }
