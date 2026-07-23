@@ -151,7 +151,6 @@ components:
       description: The provisioning state of a resource.
       type: string
       enum:
-      - unknown
       - pending
       - provisioning
       - provisioned

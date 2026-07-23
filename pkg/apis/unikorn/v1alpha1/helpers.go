@@ -24,6 +24,7 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -54,43 +55,75 @@ func IPv4AddressSliceFromIPSlice(in []net.IP) []IPv4Address {
 }
 
 // GetCondition is a generic condition lookup function.
-func GetCondition(conditions []Condition, t ConditionType) (*Condition, error) {
-	for i, condition := range conditions {
-		if condition.Type == t {
-			return &conditions[i], nil
-		}
+func GetCondition(conditions []metav1.Condition, t ConditionType) (*metav1.Condition, error) {
+	condition := meta.FindStatusCondition(conditions, string(t))
+	if condition == nil {
+		return nil, ErrStatusConditionLookup
 	}
 
-	return nil, ErrStatusConditionLookup
+	return condition, nil
 }
 
-// UpdateCondition either adds or updates a condition in the resource
-// status. If the condition, status and message match an existing condition
-// the update is ignored.
-func UpdateCondition(conditions *[]Condition, t ConditionType, status corev1.ConditionStatus, reason ConditionReason, message string) {
-	condition := Condition{
-		Type:               t,
-		Status:             status,
-		LastTransitionTime: metav1.Now(),
-		Reason:             reason,
-		Message:            message,
-	}
+// UpdateCondition either adds or updates a condition in the resource status.
+// The last transition time is only bumped when the status actually changes,
+// per the standard metav1.Condition semantics.
+func UpdateCondition(conditions *[]metav1.Condition, t ConditionType, status corev1.ConditionStatus, reason string, message string) {
+	meta.SetStatusCondition(conditions, metav1.Condition{
+		Type:    string(t),
+		Status:  metav1.ConditionStatus(status),
+		Reason:  reason,
+		Message: message,
+	})
+}
 
-	existingPtr, err := GetCondition(*conditions, t)
+// TypedCondition allows the condition reasons of a condition to be narrowed.
+// +k8s:deepcopy-gen=false
+type TypedCondition[R ~string] struct {
+	// Type is the type of the condition.
+	Type ConditionType
+	// Status is the status of the condition.
+	// Can be True, False, Unknown.
+	Status corev1.ConditionStatus
+	// Last time the condition transitioned from one status to another.
+	LastTransitionTime metav1.Time
+	// Unique, one-word, CamelCase reason for the condition's last transition.
+	Reason R
+	// Human-readable message indicating details about last transition.
+	Message string
+}
+
+// GetTypedCondition reads a condition and narrows its reason to R. Core's own
+// conditions have dedicated wrappers below (GetAvailableCondition, ...); this is
+// exported so a domain can build the same typed accessor for a condition whose
+// reason vocabulary it owns (e.g. a lifecycle Active condition), reusing the
+// generic handling rather than re-casting a raw metav1.Condition.
+func GetTypedCondition[R ~string](r StatusConditionReader, t ConditionType) (*TypedCondition[R], error) {
+	condition, err := r.StatusConditionRead(t)
 	if err != nil {
-		*conditions = append(*conditions, condition)
-
-		return
+		return nil, err
 	}
 
-	// Do a shallow copy and set the same time, then do a shallow equality to
-	// see if we need an update.
-	existing := *existingPtr
-	existing.LastTransitionTime = condition.LastTransitionTime
-
-	if existing != condition {
-		*existingPtr = condition
+	out := &TypedCondition[R]{
+		Type:               ConditionType(condition.Type),
+		Status:             corev1.ConditionStatus(condition.Status),
+		LastTransitionTime: condition.LastTransitionTime,
+		Reason:             R(condition.Reason),
+		Message:            condition.Message,
 	}
+
+	return out, nil
+}
+
+// GetAvailableCondition reads the Available condition, narrowing its reason to
+// the provisioning vocabulary.
+func GetAvailableCondition(r StatusConditionReader) (*TypedCondition[ProvisioningConditionReason], error) {
+	return GetTypedCondition[ProvisioningConditionReason](r, ConditionAvailable)
+}
+
+// GetHealthyCondition reads the Healthy condition, narrowing its reason to the
+// health vocabulary.
+func GetHealthyCondition(r StatusConditionReader) (*TypedCondition[HealthConditionReason], error) {
+	return GetTypedCondition[HealthConditionReason](r, ConditionHealthy)
 }
 
 // Contains returns if the k/v tag exists in the list.

@@ -57,28 +57,43 @@ func convertStatusCondition(in metav1.Object) openapi.ResourceProvisioningStatus
 	}
 
 	// No condition yet, it's pending.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionAvailable)
+	condition, err := unikornv1.GetAvailableCondition(reader)
 	if err != nil {
 		return openapi.ResourceProvisioningStatusPending
 	}
 
-	//nolint:exhaustive
+	// The reason vocabulary is open (metav1.Condition uses a pattern, not an
+	// enum), so we classify each known reason by its coarse disposition. The
+	// Dependency* failure reasons split by whether they can self-heal: NotReady
+	// and Failed are yields that project to provisioning (still in flight),
+	// NotFound is terminal and projects to error. Anything we do not recognise —
+	// a legacy value from an older core, or a newer reason a producer added that
+	// this reader predates — falls through to the optimistic provisioning default
+	// (the resource exists and is presumed in flight; a genuinely absent condition
+	// is handled above as pending, so we never surface an empty, non-enum status),
+	// and we warn so an operator can spot a reason the projection has not caught up
+	// with rather than a silent permanent spinner.
 	switch condition.Reason {
 	case unikornv1.ConditionReasonProvisioning:
 		return openapi.ResourceProvisioningStatusProvisioning
 	case unikornv1.ConditionReasonProvisioned:
 		return openapi.ResourceProvisioningStatusProvisioned
-	case unikornv1.ConditionReasonErrored:
+	case unikornv1.ConditionReasonErrored, unikornv1.ConditionReasonDependencyNotFound:
 		return openapi.ResourceProvisioningStatusError
-	case unikornv1.ConditionReasonDeprovisioning:
+	case unikornv1.ConditionReasonDeprovisioned, unikornv1.ConditionReasonDeprovisioning:
 		return openapi.ResourceProvisioningStatusDeprovisioning
+	case unikornv1.ConditionReasonDependencyNotReady, unikornv1.ConditionReasonDependencyFailed:
+		return openapi.ResourceProvisioningStatusProvisioning
 	}
 
-	return openapi.ResourceProvisioningStatusUnknown
+	log.Log.Info("unrecognised provisioning condition reason; defaulting to provisioning status",
+		"reason", condition.Reason, "resource", in.GetName())
+
+	return openapi.ResourceProvisioningStatusProvisioning
 }
 
 // convertHealthCondition translates from Kubernetes heath conditions to API ones.
-func convertHealthCondition(in any) openapi.ResourceHealthStatus {
+func convertHealthCondition(in metav1.Object) openapi.ResourceHealthStatus {
 	// Not a resource with status conditions, consider it healthy.
 	reader, ok := in.(unikornv1.StatusConditionReader)
 	if !ok {
@@ -86,22 +101,23 @@ func convertHealthCondition(in any) openapi.ResourceHealthStatus {
 	}
 
 	// No condition yet, it's unknown.
-	condition, err := reader.StatusConditionRead(unikornv1.ConditionHealthy)
+	condition, err := unikornv1.GetHealthyCondition(reader)
 	if err != nil {
 		return openapi.ResourceHealthStatusUnknown
 	}
 
-	//nolint:exhaustive
+	var out openapi.ResourceHealthStatus
+
 	switch condition.Reason {
 	case unikornv1.ConditionReasonHealthy:
-		return openapi.ResourceHealthStatusHealthy
+		out = openapi.ResourceHealthStatusHealthy
 	case unikornv1.ConditionReasonDegraded:
-		return openapi.ResourceHealthStatusDegraded
-	case unikornv1.ConditionReasonErrored:
-		return openapi.ResourceHealthStatusError
+		out = openapi.ResourceHealthStatusDegraded
+	case unikornv1.ConditionReasonUnknown:
+		out = openapi.ResourceHealthStatusUnknown
 	}
 
-	return openapi.ResourceHealthStatusUnknown
+	return out
 }
 
 // ResourceReadMetadata extracts generic metadata from a resource for GET APIs.

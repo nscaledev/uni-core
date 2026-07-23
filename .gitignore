@@ -1,5 +1,6 @@
 /bin
 /sboms
+/.claude
 /.codex
 /charts/core/Chart.lock
 /charts/core/charts

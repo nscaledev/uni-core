@@ -24,9 +24,9 @@ why dispositions are sentinels, never prose.
 | Disposition | Returned by | Manager behaviour | Recovery |
 | --- | --- | --- | --- |
 | `nil` | success | mark `Available: Provisioned` | n/a |
-| `ErrYield` | `ErrYield`, `Blocked(...)` | requeue on the fixed yield timeout | next reconcile |
-| `ErrTerminal` | `Terminal(reason, why)` | write `Errored`, **stop requeuing** | operator intervention |
-| `ErrUserActionRequired` | `UserActionRequired(reason, why)` | write `Errored`, **stop requeuing** | a spec change (generation bump) wakes the controller |
+| `ErrYield` | `ErrYield`, `Yield(reason, message)`, `DependencyNotReady`/`DependencyFailed` | write `Available: False`; requeue on the fixed yield timeout | next reconcile |
+| `ErrTerminal` | `Terminal(reason, message)`, `DependencyNotFound` | write `Available: False`; **stop requeuing** | operator intervention |
+| `ErrUserActionRequired` | `UserActionRequired(reason, message)` | write `Available: False`; **stop requeuing** | a spec change (generation bump) wakes the controller |
 
 `ErrTerminal` and `ErrUserActionRequired` are *terminal*: requeuing them just
 burns the workqueue on a failure that will not self-heal. Use
@@ -34,22 +34,43 @@ burns the workqueue on a failure that will not self-heal. Use
 resource is revived — that difference lives in the watch/predicate layer, not in
 the requeue decision.
 
-### The `Error` carrier and the `why`
+### The `Error` carrier: `reason` + `message`
 
-`Error` wraps a disposition with two extra fields so a single returned value
-serves both audiences cleanly:
+`Error` pairs a disposition with two surfaced fields, both user-safe, that map
+one-to-one onto the `Available` condition:
 
-- `Reason()` — a short, stable, closed-vocabulary code (e.g.
-  `insufficient_capacity`). Safe to surface to users; this is what the manager
-  writes into the `Available` condition message.
-- `Why()` — operator-facing detail. **Log-safe, not user-safe.** It is embedded
-  in `Error()` so existing logging surfaces it for free, but it is deliberately
-  kept out of the user-visible condition (CWE-209). Routing it to a user surface
-  is a separate, explicit decision.
+- `reason` — a closed-vocabulary `unikornv1.ProvisioningConditionReason` (e.g.
+  `DependencyNotReady`). Machine-classifiable and written straight onto the
+  condition's `Reason` field. Typed rather than a bare string so the vocabulary
+  is explicit at every call site; the API projection classifies each reason by
+  its coarse disposition (see the server `conversion` package).
+- `message` — user-safe human detail (e.g. `Network "prod-net" (a1b2) is not
+  ready`), written onto the condition's `Message` field. It **is** shown to the
+  user, so it must be safe: name the user's own resources, never internal
+  topology.
 
-New failure modes should return a typed `Error` rather than a bare error: the
-manager's untyped fallback stringifies the raw error into the user-visible
-message, which is a known fail-open leak.
+The manager surfaces these directly via `SetProvisioningCondition` — reason to
+`Reason`, message to `Message` — through the typed accessors `Reason()` and
+`Message()`. There is no flattening into a single string: with `metav1.Condition`
+the reason is a first-class field, so tooling reads `Reason` natively and the
+human reads `Message`.
+
+Genuinely operator-only detail (provider internals, raw upstream errors) must
+**not** go in `message` — wrap the `Error` with `fmt.Errorf` instead. `Error()`
+embeds the wrapping for logs, and the manager's `errors.As` recovers only the
+typed `Reason()`/`Message()`, so the wrapping never reaches the user surface
+(CWE-209). New failure modes should return a typed `Error`: a bare error falls
+back to the stringified error on the condition, a known fail-open leak.
+
+`Yield(reason, message)` is the `ErrYield` sibling of `Terminal` and
+`UserActionRequired`. Dependency waits are raised only through the enforced
+constructors — `DependencyNotReady` / `DependencyFailed` (both yield) and
+`DependencyNotFound` (terminal) — which take the dependency object, bind the
+reason and disposition together, and compose a safe message via the unexported
+`describeResource` (Kind from the scheme's GVK, the mutable display name, and the
+durable id). Binding them in one call is deliberate: a caller cannot pair a
+`DependencyNotFound` with a yield that would spin forever, or forget the
+description.
 
 ### Caveat: terminality is not yet wired everywhere
 

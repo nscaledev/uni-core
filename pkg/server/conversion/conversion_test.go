@@ -71,7 +71,7 @@ func newBasicObject() *basicObject {
 	}
 }
 
-func (o *basicObject) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1.Condition, error) {
+func (o *basicObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
 	return nil, ErrAny
 }
 
@@ -100,8 +100,51 @@ func newAdvancedObject() *advancedObject {
 	}
 }
 
-func (o *advancedObject) StatusConditionRead(t unikornv1.ConditionType) (*unikornv1.Condition, error) {
+func (o *advancedObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
 	return nil, ErrAny
+}
+
+// legacyReasonObject carries an Available condition whose reason is outside the
+// provisioning vocabulary, e.g. one written by an older core (such as the
+// retired Cancelled reason).
+type legacyReasonObject struct {
+	metav1.ObjectMeta
+}
+
+func newLegacyReasonObject() *legacyReasonObject {
+	return &legacyReasonObject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              id,
+			CreationTimestamp: metav1.Time{Time: creationTime},
+			Labels: map[string]string{
+				constants.NameLabel: name,
+			},
+		},
+	}
+}
+
+func (o *legacyReasonObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
+	return &metav1.Condition{
+		Type:   string(unikornv1.ConditionAvailable),
+		Status: metav1.ConditionFalse,
+		Reason: "Cancelled",
+	}, nil
+}
+
+// reasonObject carries an Available condition with a configurable reason, used to
+// exercise the provisioning-status projection for each known reason.
+type reasonObject struct {
+	metav1.ObjectMeta
+
+	reason unikornv1.ProvisioningConditionReason
+}
+
+func (o *reasonObject) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
+	return &metav1.Condition{
+		Type:   string(unikornv1.ConditionAvailable),
+		Status: metav1.ConditionFalse,
+		Reason: string(o.reason),
+	}, nil
 }
 
 func tags() unikornv1.TagList {
@@ -155,6 +198,48 @@ func TestResourceReadMetadataBasic(t *testing.T) {
 	require.Nil(t, out.ModifiedTime)
 	require.Nil(t, out.DeletionTime)
 	require.Nil(t, out.Tags)
+}
+
+// TestResourceReadMetadataUnknownReason checks that an Available reason outside the
+// provisioning vocabulary falls back to provisioning, never an invalid empty status.
+func TestResourceReadMetadataUnknownReason(t *testing.T) {
+	t.Parallel()
+
+	in := newLegacyReasonObject()
+
+	out := conversion.ResourceReadMetadata(in, nil)
+
+	require.Equal(t, openapi.ResourceProvisioningStatusProvisioning, out.ProvisioningStatus)
+}
+
+// TestResourceReadMetadataProvisioningStatus checks that each known Available
+// reason projects to the correct coarse provisioning status, in particular that
+// the Dependency* failure reasons split by disposition: the yield-family
+// (NotReady/Failed) reads as provisioning while the terminal NotFound reads as
+// error (so it is not shown as a permanent spinner).
+func TestResourceReadMetadataProvisioningStatus(t *testing.T) {
+	t.Parallel()
+
+	cases := map[unikornv1.ProvisioningConditionReason]openapi.ResourceProvisioningStatus{
+		unikornv1.ConditionReasonProvisioning:       openapi.ResourceProvisioningStatusProvisioning,
+		unikornv1.ConditionReasonProvisioned:        openapi.ResourceProvisioningStatusProvisioned,
+		unikornv1.ConditionReasonErrored:            openapi.ResourceProvisioningStatusError,
+		unikornv1.ConditionReasonDeprovisioning:     openapi.ResourceProvisioningStatusDeprovisioning,
+		unikornv1.ConditionReasonDeprovisioned:      openapi.ResourceProvisioningStatusDeprovisioning,
+		unikornv1.ConditionReasonDependencyNotReady: openapi.ResourceProvisioningStatusProvisioning,
+		unikornv1.ConditionReasonDependencyFailed:   openapi.ResourceProvisioningStatusProvisioning,
+		unikornv1.ConditionReasonDependencyNotFound: openapi.ResourceProvisioningStatusError,
+	}
+
+	for reason, want := range cases {
+		in := &reasonObject{
+			ObjectMeta: metav1.ObjectMeta{Name: id},
+			reason:     reason,
+		}
+
+		out := conversion.ResourceReadMetadata(in, nil)
+		require.Equal(t, want, out.ProvisioningStatus, "reason %q", reason)
+	}
 }
 
 // TestResourceReadMetadataAdvanced checks that a maximizes input yields a maximized output.

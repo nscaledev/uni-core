@@ -26,9 +26,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/structured-merge-diff/v4/value"
 )
@@ -269,7 +267,7 @@ type NetworkGeneric struct {
 	DNSNameservers []IPv4Address `json:"dnsNameservers"`
 }
 
-// +kubebuilder:validation:Enum=Available;Healthy
+// +kubebuilder:validation:Enum=Available;Healthy;Active
 type ConditionType string
 
 const (
@@ -280,66 +278,74 @@ const (
 	// ConditionHealthy if defined describes the current healthiness of
 	// the resource.
 	ConditionHealthy ConditionType = "Healthy"
+	// ConditionActive if defined describes whether the resource is running/live
+	// (as opposed to provisioned, which is ConditionAvailable). It is a generic
+	// axis; the reason vocabulary is domain-owned (the reason carries the precise
+	// lifecycle/power state). True means running/usable.
+	ConditionActive ConditionType = "Active"
 )
 
-// ConditionReason defines the possible reasons of a resource
-// condition.  These are generic and may be used by any condition.
-// +kubebuilder:validation:Enum=Provisioning;Provisioned;Cancelled;Errored;Deprovisioning;Deprovisioned;Unknown;Healthy;Degraded
-type ConditionReason string
+// ProvisioningConditionReason defines the possible reasons of a resource's
+// provisioning condition.
+type ProvisioningConditionReason string
 
 // Condition reasons for ConditionAvailable.
 const (
 	// ConditionReasonProvisioning is used for the Available condition
 	// to indicate that a resource has been seen, it has no pre-existing condition
 	// and we assume it's being provisioned for the first time.
-	ConditionReasonProvisioning ConditionReason = "Provisioning"
+	ConditionReasonProvisioning ProvisioningConditionReason = "Provisioning"
 	// ConditionReasonProvisioned is used for the Available condition
 	// to mean that the resource is ready to be used.
-	ConditionReasonProvisioned ConditionReason = "Provisioned"
-	// ConditionReasonCancelled is used by a condition to
-	// indicate the controller was cancelled e.g. via a container shutdown.
-	ConditionReasonCancelled ConditionReason = "Cancelled"
+	ConditionReasonProvisioned ProvisioningConditionReason = "Provisioned"
 	// ConditionReasonErrored is used by a condition to
 	// indicate an unexpected error occurred e.g. Kubernetes API transient error.
 	// If we see these, consider formulating a fix, for example a retry loop.
-	ConditionReasonErrored ConditionReason = "Errored"
+	ConditionReasonErrored ProvisioningConditionReason = "Errored"
 	// ConditionReasonDeprovisioning is used by a condition to
 	// indicate the controller has picked up a deprovision event.
-	ConditionReasonDeprovisioning ConditionReason = "Deprovisioning"
+	ConditionReasonDeprovisioning ProvisioningConditionReason = "Deprovisioning"
 	// ConditionReasonDeprovisioned is used by a condition to
 	// indicate we have finished deprovisioning and the Kubernetes
 	// garbage collector can remove the resource.
-	ConditionReasonDeprovisioned ConditionReason = "Deprovisioned"
+	ConditionReasonDeprovisioned ProvisioningConditionReason = "Deprovisioned"
 )
+
+// Failure reasons for ConditionAvailable. These are surfaced to the user and
+// classified by the API projection (see the server conversion package), so keep
+// them stable and free of internal detail. Producers set them through the
+// provisioners.Dependency* constructors, which bind each reason to the
+// disposition (yield vs terminal) that matches its coarse status.
+const (
+	// ConditionReasonDependencyNotReady means a dependency exists but is not yet
+	// provisioned. Transient: the wait clears when the dependency is ready, so it
+	// projects to the coarse provisioning (in-flight) status.
+	ConditionReasonDependencyNotReady ProvisioningConditionReason = "DependencyNotReady"
+	// ConditionReasonDependencyFailed means a dependency the resource is waiting
+	// on is itself in an error state. Still a yield from our side (it may
+	// recover), so it too projects to the coarse provisioning status.
+	ConditionReasonDependencyFailed ProvisioningConditionReason = "DependencyFailed"
+	// ConditionReasonDependencyNotFound means a referenced dependency does not
+	// exist. Terminal: no amount of waiting can resolve it, so it projects to the
+	// coarse error status.
+	ConditionReasonDependencyNotFound ProvisioningConditionReason = "DependencyNotFound"
+)
+
+// HealthConditionReason defines the possible reasons of a resource's
+// health condition.
+type HealthConditionReason string
 
 // Condition reasons for ConditionHealthy.
 const (
 	// ConditionReasonUnknown means the health status cannot be derived.
-	ConditionReasonUnknown ConditionReason = "Unknown"
+	ConditionReasonUnknown HealthConditionReason = "Unknown"
 	// ConditionReasonHealthy means all subresources associated with the
 	// resource are in a healthy state.
-	ConditionReasonHealthy ConditionReason = "Healthy"
+	ConditionReasonHealthy HealthConditionReason = "Healthy"
 	// ConditionReasonDegraded means some subresources associated with the
 	// resource are degraded e.g. a deployment not correctly scaled etc.
-	ConditionReasonDegraded ConditionReason = "Degraded"
+	ConditionReasonDegraded HealthConditionReason = "Degraded"
 )
-
-// Condition is a generic condition type for use across all resource types.
-// It's generic so that the underlying controller-manager functionality can
-// be shared across all resources.
-type Condition struct {
-	// Type is the type of the condition.
-	Type ConditionType `json:"type"`
-	// Status is the status of the condition.
-	// Can be True, False, Unknown.
-	Status corev1.ConditionStatus `json:"status"`
-	// Last time the condition transitioned from one status to another.
-	LastTransitionTime metav1.Time `json:"lastTransitionTime"`
-	// Unique, one-word, CamelCase reason for the condition's last transition.
-	Reason ConditionReason `json:"reason"`
-	// Human-readable message indicating details about last transition.
-	Message string `json:"message"`
-}
 
 // ApplicationReferenceKind defines the application kind we wish to reference.
 type ApplicationReferenceKind string

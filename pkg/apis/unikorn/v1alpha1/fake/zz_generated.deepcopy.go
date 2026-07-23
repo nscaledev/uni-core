@@ -22,7 +22,7 @@ limitations under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -91,7 +91,7 @@ func (in *ManagedResourceStatus) DeepCopyInto(out *ManagedResourceStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]v1alpha1.Condition, len(*in))
+		*out = make([]v1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
