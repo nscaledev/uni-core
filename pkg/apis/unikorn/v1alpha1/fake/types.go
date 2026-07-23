@@ -19,8 +19,6 @@ limitations under the License.
 package fake
 
 import (
-	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -40,5 +38,5 @@ type ManagedResource struct {
 }
 
 type ManagedResourceStatus struct {
-	Conditions []unikornv1.Condition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

@@ -280,11 +280,11 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 }
 
 // handleReconcileCondition inspects the error, if any, that halted the provisioning and reports
-// this as a ppropriate in the status.
+// this appropriately in the status.
 func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikornv1.ManagableResourceInterface, err error, deprovision bool) error {
 	var status corev1.ConditionStatus
 
-	var reason unikornv1.ConditionReason
+	var reason unikornv1.ProvisioningConditionReason
 
 	var message string
 
@@ -308,9 +308,8 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 			message = "Deprovisioning"
 		}
 	case errors.Is(err, context.Canceled):
-		status = corev1.ConditionFalse
-		reason = unikornv1.ConditionReasonCancelled
-		message = "Aborted due to controller shutdown"
+		// Leave it as it is.
+		return nil
 	default:
 		// Everything else, including the terminal dispositions
 		// (ErrTerminal/ErrUserActionRequired), piggybacks on Errored: there is
@@ -323,7 +322,7 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		message = provisioningFailureMessage(err)
 	}
 
-	object.StatusConditionWrite(unikornv1.ConditionAvailable, status, reason, message)
+	object.SetProvisioningCondition(status, reason, message)
 
 	if err := r.manager.GetClient().Status().Update(ctx, object); err != nil {
 		return err

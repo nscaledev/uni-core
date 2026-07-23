@@ -116,10 +116,10 @@ func (tc *testContext) newManager(c *gomock.Controller) crmanager.Manager {
 
 // mustAssertStatus checks the status is as we expect.  Very rudimentary as we only support
 // the Available status.
-func mustAssertStatus(t *testing.T, resource unikornv1.StatusConditionReader, status corev1.ConditionStatus, reason unikornv1.ConditionReason) {
+func mustAssertStatus(t *testing.T, resource unikornv1.StatusConditionReader, status corev1.ConditionStatus, reason unikornv1.ProvisioningConditionReason) {
 	t.Helper()
 
-	condition, err := resource.StatusConditionRead(unikornv1.ConditionAvailable)
+	condition, err := unikornv1.GetAvailableCondition(resource)
 	assert.NoError(t, err)
 
 	if condition != nil {
@@ -249,6 +249,8 @@ func TestReconcileCreateCancelled(t *testing.T) {
 		},
 	}
 
+	request.SetProvisioningCondition(corev1.ConditionFalse, unikornv1.ConditionReasonProvisioning, "")
+
 	tc := mustNewTestContext(t, request)
 	ctx, cancel := context.WithCancel(t.Context())
 
@@ -268,7 +270,7 @@ func TestReconcileCreateCancelled(t *testing.T) {
 
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
 	assert.Contains(t, result.Finalizers, constants.Finalizer)
-	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonCancelled)
+	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonProvisioning)
 }
 
 // TestReconcileCreateError tests resource creation and the status when an unhandled
@@ -601,6 +603,8 @@ func TestReconcileDeleteCancelled(t *testing.T) {
 		},
 	}
 
+	request.SetProvisioningCondition(corev1.ConditionFalse, unikornv1.ConditionReasonDeprovisioning, "")
+
 	tc := mustNewTestContext(t, request)
 	ctx, cancel := context.WithCancel(t.Context())
 
@@ -620,7 +624,7 @@ func TestReconcileDeleteCancelled(t *testing.T) {
 
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
 	assert.Contains(t, result.Finalizers, constants.Finalizer)
-	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonCancelled)
+	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonDeprovisioning)
 }
 
 // TestReconcileDeleteError checks that a resource marked as being deleted and
