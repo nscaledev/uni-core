@@ -19,6 +19,9 @@ package client
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -257,6 +260,38 @@ func (o *HTTPClientOptions) ApplyTLSClientConfig(ctx context.Context, cli client
 	return nil
 }
 
+// signedPrincipalAlgorithms are the algorithms accepted when verifying a signed payload.  RSA
+// covers certificates issued by cert-manager, and ECDSA those issued by SPIRE, which uses
+// EC P-256 for workload X509-SVIDs by default.  Verification must accept both for as long as
+// either issuer is in use, and must accept the new one before anything starts producing it.
+func signedPrincipalAlgorithms() []jose.SignatureAlgorithm {
+	return []jose.SignatureAlgorithm{
+		jose.PS512,
+		jose.ES256,
+		jose.ES384,
+	}
+}
+
+// signatureAlgorithm selects the signing algorithm for a key.  JOSE binds each ECDSA curve to
+// exactly one algorithm, so the curve decides rather than the caller.
+func signatureAlgorithm(key crypto.PrivateKey) (jose.SignatureAlgorithm, error) {
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		return jose.PS512, nil
+	case *ecdsa.PrivateKey:
+		switch k.Curve {
+		case elliptic.P256():
+			return jose.ES256, nil
+		case elliptic.P384():
+			return jose.ES384, nil
+		}
+
+		return "", fmt.Errorf("%w: unsupported elliptic curve %s", errors.ErrUnsupportedKeyType, k.Curve.Params().Name)
+	}
+
+	return "", errors.ErrUnsupportedKeyType
+}
+
 // EncodeAndSign takes an arbitrary data type, encodes as JSON, generates a digest and creates
 // a digital signature, then returns a stringified version for verifiable communication from
 // one service to another.  Confidentiality is ensured by the use of TLS.
@@ -271,15 +306,14 @@ func (o *HTTPClientOptions) EncodeAndSign(ctx context.Context, cli client.Client
 		return "", err
 	}
 
-	// TODO: EC is equally valid and need support.
-	pkey, ok := certificate.PrivateKey.(*rsa.PrivateKey)
-	if !ok {
-		return "", errors.ErrUnsupportedKeyType
+	algorithm, err := signatureAlgorithm(certificate.PrivateKey)
+	if err != nil {
+		return "", err
 	}
 
 	signingKey := jose.SigningKey{
-		Algorithm: jose.PS512,
-		Key:       pkey,
+		Algorithm: algorithm,
+		Key:       certificate.PrivateKey,
 	}
 
 	signer, err := jose.NewSigner(signingKey, nil)
@@ -298,18 +332,18 @@ func (o *HTTPClientOptions) EncodeAndSign(ctx context.Context, cli client.Client
 // VerifyAndDecode checks the payload's signature against the message and decodes the
 // payload into an arbitrary data type.
 func VerifyAndDecode(data any, payload string, certificate *x509.Certificate) error {
-	signedData, err := jose.ParseSignedCompact(payload, []jose.SignatureAlgorithm{jose.PS512})
+	signedData, err := jose.ParseSignedCompact(payload, signedPrincipalAlgorithms())
 	if err != nil {
 		return err
 	}
 
-	// TODO: EC is equally valid and need support.
-	key, ok := certificate.PublicKey.(*rsa.PublicKey)
-	if !ok {
+	switch certificate.PublicKey.(type) {
+	case *rsa.PublicKey, *ecdsa.PublicKey:
+	default:
 		return errors.ErrUnsupportedKeyType
 	}
 
-	verifiedData, err := signedData.Verify(key)
+	verifiedData, err := signedData.Verify(certificate.PublicKey)
 	if err != nil {
 		return err
 	}

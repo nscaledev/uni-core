@@ -18,6 +18,9 @@ package client_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -343,4 +346,139 @@ func serialNumber(t *testing.T, certificate *tls.Certificate) int64 {
 	require.NoError(t, err)
 
 	return leaf.SerialNumber.Int64()
+}
+
+// signedPrincipalSecret issues a self signed client certificate for the given key, in the shape
+// the client certificate Secret holds one.
+func signedPrincipalSecret(t *testing.T, key crypto.Signer) *corev1.Secret {
+	t.Helper()
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "client",
+		},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+
+	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	require.NoError(t, err)
+
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "test",
+			Name:      "client-cert",
+		},
+		Type: corev1.SecretTypeTLS,
+		Data: map[string][]byte{
+			corev1.TLSCertKey:       pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER}),
+			corev1.TLSPrivateKeyKey: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}),
+		},
+	}
+}
+
+// mustEncodeAndSign signs a payload with the client certificate held in the given Secret, and
+// returns the signed value alongside the certificate a verifier recovers from the same Secret.
+func mustEncodeAndSign(t *testing.T, secret *corev1.Secret, data any) (string, *x509.Certificate) {
+	t.Helper()
+
+	scheme, err := coreclient.NewScheme()
+	require.NoError(t, err)
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	options := &coreclient.HTTPClientOptions{}
+
+	flags := pflagSet(t, options)
+	require.NoError(t, flags.Parse([]string{
+		"--client-certificate-namespace=test",
+		"--client-certificate-name=client-cert",
+	}))
+
+	value, err := options.EncodeAndSign(t.Context(), client, data)
+	require.NoError(t, err)
+
+	block, _ := pem.Decode(secret.Data[corev1.TLSCertKey])
+	require.NotNil(t, block)
+
+	certificate, err := x509.ParseCertificate(block.Bytes)
+	require.NoError(t, err)
+
+	return value, certificate
+}
+
+// TestSignedPrincipalRoundTrip covers the signed principal a controller sends when it acts on a
+// resource's behalf.  It is signed with whatever private key the service's client certificate
+// holds and verified with the public key from that same certificate, so the signer and the
+// verifier have to agree on every key type any issuer produces.
+//
+// cert-manager issues RSA and SPIRE issues EC P-256 for workload X509-SVIDs, so an RSA-only
+// implementation quietly confines controllers to cert-manager.  It fails closed, but a long way
+// from the cause: the signing call returns an unsupported key type and the request that would
+// have carried the principal never gets made.
+func TestSignedPrincipalRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		key  func(*testing.T) crypto.Signer
+	}{
+		{
+			name: "RSA 2048, as cert-manager issues",
+			key: func(t *testing.T) crypto.Signer {
+				t.Helper()
+
+				key, err := rsa.GenerateKey(rand.Reader, 2048)
+				require.NoError(t, err)
+
+				return key
+			},
+		},
+		{
+			name: "EC P-256, as SPIRE issues by default",
+			key: func(t *testing.T) crypto.Signer {
+				t.Helper()
+
+				key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+				require.NoError(t, err)
+
+				return key
+			},
+		},
+		{
+			name: "EC P-384",
+			key: func(t *testing.T) crypto.Signer {
+				t.Helper()
+
+				key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+				require.NoError(t, err)
+
+				return key
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			principal := map[string]string{"organizationID": "org1", "actor": "someone@example.com"}
+
+			value, certificate := mustEncodeAndSign(t, signedPrincipalSecret(t, tc.key(t)), principal)
+
+			decoded := map[string]string{}
+			require.NoError(t, coreclient.VerifyAndDecode(&decoded, value, certificate))
+			require.Equal(t, principal, decoded)
+
+			// A signature only means anything if the wrong certificate is rejected, and the
+			// verifier is handed a certificate by the caller rather than choosing one.  The
+			// second key is the same type as the first, so each case rests only on its own.
+			_, otherCertificate := mustEncodeAndSign(t, signedPrincipalSecret(t, tc.key(t)), principal)
+			require.Error(t, coreclient.VerifyAndDecode(&decoded, value, otherCertificate))
+		})
+	}
 }
