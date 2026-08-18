@@ -20,6 +20,7 @@ package manager
 
 import (
 	"context"
+	"io"
 	"os"
 
 	"github.com/spf13/pflag"
@@ -80,6 +81,29 @@ type ControllerUpgrader interface {
 // a controller.
 type ControllerInitializer interface {
 	Initialize(ctx context.Context, mgr manager.Manager, opts *options.Options) error
+}
+
+// CredentialInitializer when implemented on a controller's options lets its client
+// credential be opened once at start up, before anything reconciles with it.
+// coreclient.HTTPClientOptions.InitSPIFFE satisfies this signature; options that hold one
+// expose it by delegation.
+//
+// It is called from Run rather than from a binary's main because Run *is* main for a
+// controller -- a controller's main.go is a single call to it -- and this is the only
+// point that has both the parsed flags and the process's root context.  Both are needed:
+// the flags decide whether there is a credential to open at all, and opening it here
+// rather than lazily is what makes a misconfiguration fail at start up instead of on
+// every reconcile forever.
+//
+// The context should be the process's root one, but for a narrower reason than it might
+// appear.  At the go-spiffe v2.8.1 pin the rotation watch runs on a background context of
+// the library's own (workloadapi/watcher.go:143); the caller's context governs only the
+// initial dial and the wait for the first SVID, and rotation stops on Close rather than on
+// cancellation.  A shorter-lived context would therefore not silently stop refreshing the
+// SVID.  Passing the root context is the conservative choice against that internal detail
+// changing, and it puts the returned Closer's lifetime where it belongs.
+type CredentialInitializer interface {
+	InitSPIFFE(ctx context.Context) (io.Closer, error)
 }
 
 // getManager returns a generic manager.
@@ -164,6 +188,24 @@ func doInitialize(f ControllerFactory, mgr manager.Manager, options *options.Opt
 	return nil
 }
 
+// doInitializeCredential opens the controller's client credential, if it has one, so that
+// a misconfiguration fails at start up rather than on every reconcile forever.  ctx must
+// be the process's root context: see CredentialInitializer.  A controller with no
+// credential gets a closer that does nothing, so the caller needs no special case.
+func doInitializeCredential(ctx context.Context, controllerOptions ControllerOptions) (io.Closer, error) {
+	credentials, ok := controllerOptions.(CredentialInitializer)
+	if !ok {
+		return noopCloser{}, nil
+	}
+
+	return credentials.InitSPIFFE(ctx)
+}
+
+// noopCloser stands in for a controller with no credential to close.
+type noopCloser struct{}
+
+func (noopCloser) Close() error { return nil }
+
 // Run provides common manager initialization and execution.
 func Run(f ControllerFactory) {
 	o := &options.Options{}
@@ -184,6 +226,15 @@ func Run(f ControllerFactory) {
 	logger.Info("service starting", "application", service.Name, "version", service.Version, "revision", service.Revision)
 
 	ctx := signals.SetupSignalHandler()
+
+	// Open the client credential before anything exists that could use it.  ctx is the
+	// signal-handler context, which lives until the process is asked to stop: see
+	// CredentialInitializer for why nothing shorter will do.
+	credentialCloser, err := doInitializeCredential(ctx, controllerOptions)
+	if err != nil {
+		logger.Error(err, "client credential initialization failed")
+		os.Exit(1)
+	}
 
 	if err := o.SetupOpenTelemetry(ctx); err != nil {
 		logger.Error(err, "open telemetry setup failed")
@@ -221,4 +272,9 @@ func Run(f ControllerFactory) {
 		logger.Error(err, "manager terminated")
 		os.Exit(1)
 	}
+
+	// Closed here rather than deferred: every other path out of Run calls os.Exit, which
+	// skips defers, so a defer would only look like it released the credential.  This is
+	// the one path where Run returns, and the error is unactionable during shutdown.
+	_ = credentialCloser.Close()
 }

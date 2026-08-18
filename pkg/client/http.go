@@ -27,11 +27,15 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/spf13/pflag"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
 	"github.com/unikorn-cloud/core/pkg/errors"
 
@@ -41,6 +45,12 @@ import (
 )
 
 const defaultClientCertificateReloadInterval = 24 * time.Hour
+
+// Certificate sources for --client-certificate-source.
+const (
+	CertificateSourceSecret = "secret"
+	CertificateSourceSPIFFE = "spiffe"
+)
 
 // HTTPOptions are generic options for HTTP clients.
 type HTTPOptions struct {
@@ -112,6 +122,18 @@ type HTTPClientOptions struct {
 	// reloadInterval determines how often the client certificate is reloaded.
 	reloadInterval time.Duration
 	now            func() time.Time
+	// certificateSource selects where the client credential comes from.
+	certificateSource string
+	// spiffeServerID is the SPIFFE ID the server must present.  Required in SPIFFE mode;
+	// InitSPIFFE and ApplyTLSClientConfig both reject the empty value there.
+	spiffeServerID string
+	// spiffeSources is the live Workload API connection, set by InitSPIFFE.
+	spiffeSources Sources
+	// newSources opens the Workload API connection.  Nil means NewSPIFFESources, which
+	// is what production always uses; an internal test substitutes a static pair so
+	// that "flags in, usable credential out" can be asserted without a live agent
+	// socket.
+	newSources func(ctx context.Context) (Sources, io.Closer, error)
 }
 
 // AddFlags adds the options to the CLI flags.
@@ -119,6 +141,8 @@ func (o *HTTPClientOptions) AddFlags(f *pflag.FlagSet) {
 	f.StringVar(&o.secretNamespace, "client-certificate-namespace", o.secretNamespace, "Client certificate secret namespace.")
 	f.StringVar(&o.secretName, "client-certificate-name", o.secretName, "Client certificate secret name.")
 	f.DurationVar(&o.reloadInterval, "client-certificate-reload-interval", defaultClientCertificateReloadInterval, "How often to check for a rotated client certificate. Zero or negative disables periodic reload.")
+	f.StringVar(&o.certificateSource, "client-certificate-source", CertificateSourceSecret, "Where the client credential comes from: secret or spiffe.  In spiffe mode the Workload API address comes from SPIFFE_ENDPOINT_SOCKET.")
+	f.StringVar(&o.spiffeServerID, "spiffe-server-id", "", "SPIFFE ID the server must present.  Required in spiffe mode: the client authorizes only this exact ID, and startup fails if it is unset.")
 }
 
 // SetNow overrides the clock used for inline client certificate reload checks.
@@ -143,19 +167,6 @@ type tlsClientCertificateSource struct {
 	reloadInterval time.Duration
 	now            func() time.Time
 	loader         func() (*tls.Certificate, error)
-}
-
-type tlsClientCertificateReloader struct {
-	options *HTTPClientOptions
-	client  client.Client
-}
-
-func (r *tlsClientCertificateReloader) Load() (*tls.Certificate, error) {
-	// Reloads happen on future TLS handshakes, so reusing the setup context would make
-	// certificate refresh depend on whatever timeout/cancellation policy existed when
-	// the transport was constructed. A background context keeps reloads independent of
-	// that one-shot setup path. The tradeoff is that reloads are not currently time-bounded.
-	return r.options.loadTLSCertificate(context.Background(), r.client)
 }
 
 func newTLSClientCertificateSource(reloadInterval time.Duration, now func() time.Time, loader func() (*tls.Certificate, error)) (*tlsClientCertificateSource, error) {
@@ -240,24 +251,151 @@ func (o *HTTPClientOptions) loadTLSCertificate(ctx context.Context, cli client.C
 // ApplyTLSClientConfig loads op a client certificate if one is configured and applies
 // it to the provided TLS configuration.
 func (o *HTTPClientOptions) ApplyTLSClientConfig(ctx context.Context, cli client.Client, config *tls.Config) error {
+	if o.certificateSource == CertificateSourceSPIFFE {
+		if o.spiffeSources == nil {
+			return fmt.Errorf("%w: SPIFFE sources not initialised", ErrClientCredential)
+		}
+
+		// InitSPIFFE rejects an empty --spiffe-server-id at startup.  This check is
+		// defence in depth for a caller that sets spiffeSources directly without going
+		// through InitSPIFFE: an empty ID must never fall back to authorizing any peer.
+		if o.spiffeServerID == "" {
+			return fmt.Errorf("%w: --spiffe-server-id is required in spiffe mode", ErrClientCredential)
+		}
+
+		id, err := spiffeid.FromString(o.spiffeServerID)
+		if err != nil {
+			return fmt.Errorf("%w: parsing --spiffe-server-id: %w", ErrClientCredential, err)
+		}
+
+		// HookMTLSClientConfig sets InsecureSkipVerify: true.  That is not a weakening.
+		// A SPIFFE ID lives in a URI SAN, so hostname verification would always fail;
+		// go-spiffe replaces it with VerifyPeerCertificate, which checks the chain
+		// against the bundle and then authorizes the SPIFFE ID.  An error there aborts
+		// the handshake, so verification is relocated rather than skipped.  See
+		// go-spiffe spiffetls/tlsconfig/config.go:187.
+		//
+		// It also resets config.RootCAs to nil (resetAuthFields, config.go:244),
+		// discarding whatever ApplyTLSConfig set above from --identity-ca-secret-name.
+		// That is deliberate: in SPIFFE mode the peer is verified by SPIFFE ID against
+		// the trust bundle instead of by PKI chain validation, so the CA secret becomes
+		// a no-op here.  MinVersion survives the reset -- resetAuthFields only raises it
+		// to at least TLS 1.2 and never lowers it, and TLSClientConfig already sets TLS
+		// 1.3 before either function runs (confirmed against go-spiffe v2.8.1 source).
+		// The consequence: a SPIFFE-mode client can only talk to a SPIFFE-serving
+		// endpoint, with no fallback to a PKI-terminated one.  A component migrates its
+		// credential source and its target host together, or not at all.
+		tlsconfig.HookMTLSClientConfig(config, o.spiffeSources, o.spiffeSources, tlsconfig.AuthorizeID(id))
+
+		return nil
+	}
+
 	if o.secretNamespace == "" || o.secretName == "" {
 		return nil
 	}
 
-	reloader := &tlsClientCertificateReloader{
-		options: o,
-		client:  cli,
-	}
-
-	// Reloads happen during future TLS handshakes, so they must not depend on the setup context.
-	source, err := newTLSClientCertificateSource(o.reloadInterval, o.clock(), reloader.Load)
+	source, err := o.credentialSource(cli)
 	if err != nil {
 		return err
 	}
 
-	config.GetClientCertificate = source.GetClientCertificate
+	// Reloads happen during future TLS handshakes, so they must not depend on the setup context.
+	//nolint:contextcheck // reloads intentionally use a background context rather than the setup context above.
+	reloading, err := newTLSClientCertificateSource(o.reloadInterval, o.clock(), func() (*tls.Certificate, error) {
+		return source.Certificate(context.Background())
+	})
+	if err != nil {
+		return err
+	}
+
+	config.GetClientCertificate = reloading.GetClientCertificate
 
 	return nil
+}
+
+// credentialSource returns the source the configured flags select.
+func (o *HTTPClientOptions) credentialSource(cli client.Client) (credentialSource, error) {
+	switch o.certificateSource {
+	case CertificateSourceSecret, "":
+		return &secretCredentialSource{options: o, client: cli}, nil
+	case CertificateSourceSPIFFE:
+		if o.secretName != "" || o.secretNamespace != "" {
+			return nil, fmt.Errorf("%w: --client-certificate-source=spiffe conflicts with --client-certificate-name/--client-certificate-namespace; set one or the other", ErrClientCredential)
+		}
+
+		if o.spiffeSources == nil {
+			return nil, fmt.Errorf("%w: SPIFFE sources not initialised; call InitSPIFFE before building clients", ErrClientCredential)
+		}
+
+		return SPIFFECredential(o.spiffeSources), nil
+	default:
+		return nil, fmt.Errorf("%w: unknown --client-certificate-source %q", ErrClientCredential, o.certificateSource)
+	}
+}
+
+// noopCloser stands in when SPIFFE mode is off, so callers can defer Close
+// unconditionally.
+type noopCloser struct{}
+
+func (noopCloser) Close() error { return nil }
+
+// NewSPIFFESources opens a Workload API connection.  The address comes from
+// SPIFFE_ENDPOINT_SOCKET, which is the variable the SPIFFE specification defines and
+// the csi.spiffe.io driver sets.
+//
+// The returned source streams rotations for the process's lifetime, so its Close must
+// not run until every consumer is done with it.
+func NewSPIFFESources(ctx context.Context) (Sources, io.Closer, error) {
+	source, err := workloadapi.NewX509Source(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: connecting to the Workload API: %w", ErrClientCredential, err)
+	}
+
+	return source, source, nil
+}
+
+// InitSPIFFE validates the certificate source and, in SPIFFE mode, opens the Workload
+// API connection; in Secret mode it is a no-op.  Call it once at startup, before any
+// client is built, so a misconfiguration fails loudly there instead of silently at
+// first use.
+//
+// Mode-string validation happens before the Secret-mode early return, so an unknown
+// --client-certificate-source is rejected regardless of mode.  The SPIFFE-mode checks
+// below matter because ApplyTLSClientConfig's SPIFFE branch never calls
+// credentialSource: without them, a client that never signs a principal (so never
+// reaches credentialSource's own conflict check) would silently ignore stray
+// --client-certificate-name/--client-certificate-namespace flags, or run with no server
+// authorization at all if --spiffe-server-id were left unset.
+func (o *HTTPClientOptions) InitSPIFFE(ctx context.Context) (io.Closer, error) {
+	switch o.certificateSource {
+	case CertificateSourceSecret, "":
+		return noopCloser{}, nil
+	case CertificateSourceSPIFFE:
+	default:
+		return nil, fmt.Errorf("%w: unknown --client-certificate-source %q", ErrClientCredential, o.certificateSource)
+	}
+
+	if o.secretName != "" || o.secretNamespace != "" {
+		return nil, fmt.Errorf("%w: --client-certificate-source=spiffe conflicts with --client-certificate-name/--client-certificate-namespace; set one or the other", ErrClientCredential)
+	}
+
+	if o.spiffeServerID == "" {
+		return nil, fmt.Errorf("%w: --spiffe-server-id is required in spiffe mode", ErrClientCredential)
+	}
+
+	newSources := o.newSources
+	if newSources == nil {
+		newSources = NewSPIFFESources
+	}
+
+	sources, closer, err := newSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	o.spiffeSources = sources
+
+	return closer, nil
 }
 
 // signedPrincipalAlgorithms are the algorithms accepted when verifying a signed payload.  RSA
@@ -301,7 +439,12 @@ func (o *HTTPClientOptions) EncodeAndSign(ctx context.Context, cli client.Client
 		return "", err
 	}
 
-	certificate, err := o.loadTLSCertificate(ctx, cli)
+	source, err := o.credentialSource(cli)
+	if err != nil {
+		return "", err
+	}
+
+	certificate, err := source.Certificate(ctx)
 	if err != nil {
 		return "", err
 	}
