@@ -20,6 +20,8 @@ package client
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	argoprojv1 "github.com/unikorn-cloud/core/pkg/apis/argoproj/v1alpha1"
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -35,6 +37,67 @@ import (
 
 // SchemeAdder allows custom resources to be added to the scheme.
 type SchemeAdder func(*runtime.Scheme) error
+
+var (
+	errCacheStopped = errors.New("cache stopped before synchronization")
+	errCacheSync    = errors.New("cache failed to synchronize")
+)
+
+type cacheRunner interface {
+	Start(ctx context.Context) error
+	WaitForCacheSync(ctx context.Context) bool
+}
+
+func startAndSyncCache(ctx context.Context, resourceCache cacheRunner) error {
+	cacheCtx, cancel := context.WithCancel(ctx)
+	cancelOnError := true
+
+	defer func() {
+		if cancelOnError {
+			cancel()
+		}
+	}()
+
+	startResult := make(chan error, 1)
+	syncResult := make(chan bool, 1)
+
+	go func() {
+		startResult <- resourceCache.Start(cacheCtx)
+	}()
+
+	go func() {
+		syncResult <- resourceCache.WaitForCacheSync(cacheCtx)
+	}()
+
+	select {
+	case err := <-startResult:
+		if err != nil {
+			return fmt.Errorf("start cache: %w", err)
+		}
+
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("synchronize cache: %w", err)
+		}
+
+		return errCacheStopped
+	case synced := <-syncResult:
+		if synced {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("synchronize cache: %w", err)
+			}
+
+			cancelOnError = false
+
+			return nil
+		}
+
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("synchronize cache: %w", err)
+		}
+
+		return errCacheSync
+	}
+}
 
 // NewScheme returns a scheme with all types that are required by unikorn.
 // TODO: we'd really love to include ArgoCD here, but it's dependency hell.
@@ -85,25 +148,25 @@ func New(ctx context.Context, schemes ...SchemeAdder) (client.Client, error) {
 		return nil, err
 	}
 
-	cache, err := cache.New(config, cache.Options{Scheme: scheme})
+	resourceCache, err := cache.New(config, cache.Options{Scheme: scheme})
 	if err != nil {
 		return nil, err
 	}
 
-	go func() {
-		_ = cache.Start(ctx)
-	}()
-
 	clientOptions := client.Options{
 		Scheme: scheme,
 		Cache: &client.CacheOptions{
-			Reader:       cache,
+			Reader:       resourceCache,
 			Unstructured: true,
 		},
 	}
 
 	c, err := client.NewWithWatch(config, clientOptions)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := startAndSyncCache(ctx, resourceCache); err != nil {
 		return nil, err
 	}
 
