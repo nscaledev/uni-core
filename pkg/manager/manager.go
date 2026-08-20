@@ -135,16 +135,17 @@ func getController(o *options.Options, controllerOptions ControllerOptions, mana
 }
 
 // doUpgrade allows a controller to optionally define an online upgrade procedure.
-func doUpgrade(f ControllerFactory, options *options.Options) error {
+func doUpgrade(ctx context.Context, f ControllerFactory, options *options.Options) error {
 	if upgrader, ok := f.(ControllerUpgrader); ok {
-		ctx := context.TODO()
+		upgradeCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
-		client, err := coreclient.New(ctx, f.Schemes()...)
+		client, err := coreclient.New(upgradeCtx, f.Schemes()...)
 		if err != nil {
 			return err
 		}
 
-		if err := upgrader.Upgrade(ctx, client, options); err != nil {
+		if err := upgrader.Upgrade(upgradeCtx, client, options); err != nil {
 			return err
 		}
 	}
@@ -190,7 +191,7 @@ func Run(f ControllerFactory) {
 		os.Exit(1)
 	}
 
-	if err := doUpgrade(f, o); err != nil {
+	if err := doUpgrade(ctx, f, o); err != nil {
 		logger.Error(err, "resource upgrade failed")
 		os.Exit(1)
 	}
