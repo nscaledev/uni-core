@@ -5,6 +5,7 @@
 //
 //	mockgen -source=interfaces.go -destination=mock/interfaces.go -package=mock
 //
+
 // Package mock is a generated GoMock package.
 package mock
 
@@ -25,6 +26,7 @@ import (
 type MockResourceLabeller struct {
 	ctrl     *gomock.Controller
 	recorder *MockResourceLabellerMockRecorder
+	isgomock struct{}
 }
 
 // MockResourceLabellerMockRecorder is the mock recorder for MockResourceLabeller.
@@ -63,6 +65,7 @@ func (mr *MockResourceLabellerMockRecorder) ResourceLabels() *gomock.Call {
 type MockReconcilePauser struct {
 	ctrl     *gomock.Controller
 	recorder *MockReconcilePauserMockRecorder
+	isgomock struct{}
 }
 
 // MockReconcilePauserMockRecorder is the mock recorder for MockReconcilePauser.
@@ -100,6 +103,7 @@ func (mr *MockReconcilePauserMockRecorder) Paused() *gomock.Call {
 type MockStatusConditionReader struct {
 	ctrl     *gomock.Controller
 	recorder *MockStatusConditionReaderMockRecorder
+	isgomock struct{}
 }
 
 // MockStatusConditionReaderMockRecorder is the mock recorder for MockStatusConditionReader.
@@ -138,6 +142,7 @@ func (mr *MockStatusConditionReaderMockRecorder) StatusConditionRead(t any) *gom
 type MockProvisioningConditionWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockProvisioningConditionWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockProvisioningConditionWriterMockRecorder is the mock recorder for MockProvisioningConditionWriter.
@@ -173,6 +178,7 @@ func (mr *MockProvisioningConditionWriterMockRecorder) SetProvisioningCondition(
 type MockHealthConditionWriter struct {
 	ctrl     *gomock.Controller
 	recorder *MockHealthConditionWriterMockRecorder
+	isgomock struct{}
 }
 
 // MockHealthConditionWriterMockRecorder is the mock recorder for MockHealthConditionWriter.
@@ -208,6 +214,7 @@ func (mr *MockHealthConditionWriterMockRecorder) SetHealthCondition(status, reas
 type MockManagableResourceInterface struct {
 	ctrl     *gomock.Controller
 	recorder *MockManagableResourceInterfaceMockRecorder
+	isgomock struct{}
 }
 
 // MockManagableResourceInterfaceMockRecorder is the mock recorder for MockManagableResourceInterface.
@@ -579,15 +586,15 @@ func (mr *MockManagableResourceInterfaceMockRecorder) SetGeneration(generation a
 }
 
 // SetLabels mocks base method.
-func (m *MockManagableResourceInterface) SetLabels(labels map[string]string) {
+func (m *MockManagableResourceInterface) SetLabels(arg0 map[string]string) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SetLabels", labels)
+	m.ctrl.Call(m, "SetLabels", arg0)
 }
 
 // SetLabels indicates an expected call of SetLabels.
-func (mr *MockManagableResourceInterfaceMockRecorder) SetLabels(labels any) *gomock.Call {
+func (mr *MockManagableResourceInterfaceMockRecorder) SetLabels(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLabels", reflect.TypeOf((*MockManagableResourceInterface)(nil).SetLabels), labels)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLabels", reflect.TypeOf((*MockManagableResourceInterface)(nil).SetLabels), arg0)
 }
 
 // SetManagedFields mocks base method.
