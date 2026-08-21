@@ -23,7 +23,7 @@ GOBIN := $(if $(shell go env GOBIN),$(shell go env GOBIN),$(GOPATH)/bin)
 LINT_VERSION=v2.1.5
 
 # Defines the version of the CRD generation tools to use.
-CONTROLLER_TOOLS_VERSION=v0.17.3
+CONTROLLER_TOOLS_VERSION=v0.20.0
 
 # Defines the version of code generator tools to use.
 # This should be kept in sync with the Kubenetes library versions defined in go.mod.
@@ -34,7 +34,7 @@ OPENAPI_CODEGEN_VERSION=v2.4.1
 OPENAPI_FILES = pkg/openapi/types.go pkg/openapi/schema.go
 
 # Defined the mock generator version.
-MOCKGEN_VERSION=v0.3.0
+MOCKGEN_VERSION=v0.6.0
 
 # This is the base directory to generate kubernetes API primitives from e.g.
 # clients and CRDs.

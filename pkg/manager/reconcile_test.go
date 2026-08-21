@@ -396,8 +396,7 @@ func TestReconcileCreateTerminal(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Terminal failures must not be requeued.
-	assert.Zero(t, result.RequeueAfter)
-	assert.False(t, result.Requeue)
+	assert.Zero(t, result)
 
 	// Does the resource have all the correct metadata and status information set?
 	var resource unikornv1fake.ManagedResource
@@ -453,8 +452,7 @@ func TestReconcileCreateTerminalWrapped(t *testing.T) {
 	assert.NoError(t, err)
 
 	// IsTerminal must see through the wrapping: parked, not requeued.
-	assert.Zero(t, result.RequeueAfter)
-	assert.False(t, result.Requeue)
+	assert.Zero(t, result)
 
 	var resource unikornv1fake.ManagedResource
 

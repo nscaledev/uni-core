@@ -5,6 +5,7 @@
 //
 //	mockgen -source=interfaces.go -destination=mock/interfaces.go -package=mock
 //
+
 // Package mock is a generated GoMock package.
 package mock
 
@@ -20,6 +21,7 @@ import (
 type MockDriver struct {
 	ctrl     *gomock.Controller
 	recorder *MockDriverMockRecorder
+	isgomock struct{}
 }
 
 // MockDriverMockRecorder is the mock recorder for MockDriver.

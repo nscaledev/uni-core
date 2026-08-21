@@ -5,6 +5,7 @@
 //
 //	mockgen -source=interfaces.go -destination=mock/interfaces.go -package=mock
 //
+
 // Package mock is a generated GoMock package.
 package mock
 
@@ -22,6 +23,7 @@ import (
 type MockRemoteCluster struct {
 	ctrl     *gomock.Controller
 	recorder *MockRemoteClusterMockRecorder
+	isgomock struct{}
 }
 
 // MockRemoteClusterMockRecorder is the mock recorder for MockRemoteCluster.
@@ -74,6 +76,7 @@ func (mr *MockRemoteClusterMockRecorder) ID() *gomock.Call {
 type MockProvisioner struct {
 	ctrl     *gomock.Controller
 	recorder *MockProvisionerMockRecorder
+	isgomock struct{}
 }
 
 // MockProvisionerMockRecorder is the mock recorder for MockProvisioner.
@@ -139,6 +142,7 @@ func (mr *MockProvisionerMockRecorder) ProvisionerName() *gomock.Call {
 type MockManagerProvisioner struct {
 	ctrl     *gomock.Controller
 	recorder *MockManagerProvisionerMockRecorder
+	isgomock struct{}
 }
 
 // MockManagerProvisionerMockRecorder is the mock recorder for MockManagerProvisioner.
