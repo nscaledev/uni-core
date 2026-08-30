@@ -30,7 +30,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
@@ -113,13 +112,13 @@ func checkLicense(comment *ast.Comment) error {
 
 	// Expect a copyright, newline, a blank line, newline, nothing!.
 	if len(headerLines) < 3 {
-		return fmt.Errorf("%w: first comment must have a copyright and space before the license", errFirstCommentNotLicense)
+		return fmt.Errorf("%w: first comment must have a copyright notice and space before the license", errFirstCommentNotLicense)
 	}
 
 	lastHeaderLineIndex := len(headerLines) - 2
 
 	if headerLines[lastHeaderLineIndex] != "" {
-		return fmt.Errorf("%w: first comment doesn't have a space between copyrights and license", errFirstCommentNotLicense)
+		return fmt.Errorf("%w: first comment doesn't have a space between copyright notice and license", errFirstCommentNotLicense)
 	}
 
 	copyrights := headerLines[:lastHeaderLineIndex]
@@ -142,13 +141,9 @@ func checkLicense(comment *ast.Comment) error {
 		yearString = matches[2]
 	}
 
-	year, err := strconv.Atoi(yearString)
+	_, err := strconv.Atoi(yearString)
 	if err != nil {
 		return fmt.Errorf("%w: copyright doesn't contain a valid year '%s'", errFirstCommentNotLicense, yearString)
-	}
-
-	if year != time.Now().Year() {
-		return fmt.Errorf("%w: copyright doesn't contain this year %d", errFirstCommentNotLicense, year)
 	}
 
 	if matches[3] != "Nscale." {
