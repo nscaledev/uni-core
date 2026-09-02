@@ -21,6 +21,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"math"
+	"math/rand/v2"
 	"time"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -49,6 +51,12 @@ var (
 	// kind.
 	ErrResourceError = errors.New("unable to assert resource type")
 )
+
+// requeueJitterFraction is the reciprocal of the maximum jitter added to the
+// requeue period, i.e. 10 gives up to a tenth of a period of spread.  Enough to
+// break a convoy up quickly, small enough that the period still means what an
+// operator set it to.
+const requeueJitterFraction = 10
 
 // ProvisionerCreateFunc provides a type agnosic method to create a root provisioner.
 type ProvisionerCreateFunc func(ControllerOptions) provisioners.ManagerProvisioner
@@ -267,7 +275,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 		log.Info("failed to update status, enqueuing retry")
 
 		//nolint:nilerr
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		return reconcile.Result{RequeueAfter: jittered(constants.DefaultYieldTimeout)}, nil
 	}
 
 	// If anything went wrong, requeue for another attempt.
@@ -282,7 +290,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 
 		log.Info("controller yielding", "message", perr)
 
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		return reconcile.Result{RequeueAfter: jittered(constants.DefaultYieldTimeout)}, nil
 	}
 
 	// All good, signal the resource can be deleted.
@@ -290,7 +298,7 @@ func (r *Reconciler) reconcileDelete(ctx context.Context, provisioner provisione
 		if err := r.manager.GetClient().Update(ctx, object); err != nil {
 			log.Info("failed to remove finalizer", "error", err)
 
-			return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+			return reconcile.Result{RequeueAfter: jittered(constants.DefaultYieldTimeout)}, nil
 		}
 	}
 
@@ -316,7 +324,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	// Update the status conditionally, this will remove transient errors etc.
 	if err := r.handleReconcileCondition(ctx, object, perr, false); err != nil {
 		//nolint:nilerr
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		return reconcile.Result{RequeueAfter: jittered(constants.DefaultYieldTimeout)}, nil
 	}
 
 	// If anything went wrong, requeue for another attempt.
@@ -340,7 +348,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 			log.Error(perr, "provisioning failed unexpectedly")
 		}
 
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		return reconcile.Result{RequeueAfter: jittered(constants.DefaultYieldTimeout)}, nil
 	}
 
 	log.Info("reconcile complete")
@@ -355,7 +363,50 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	// Note this deliberately does NOT apply to the terminal branch above.  A
 	// terminal disposition means the failure will not self-heal, so requeuing it
 	// is precisely the workqueue burn ErrTerminal exists to stop.
-	return reconcile.Result{RequeueAfter: r.requeuePeriod}, nil
+	return reconcile.Result{RequeueAfter: jittered(r.requeuePeriod)}, nil
+}
+
+// jittered spreads a requeue duration so that resources which requeue together
+// do not stay together.
+//
+// WHY: controller-runtime schedules a requeue for exactly the duration given, so
+// resources that finish together re-arm together.  The initial informer list
+// drains the whole fleet into a narrow window, and every resource then wakes at
+// exactly one interval after its own completion, so that window is not
+// transient - it is preserved for the life of the process, and the fleet hits
+// the provider and the API server in one burst per interval with both idle in
+// between.
+//
+// Every fixed requeue in this package goes through here, not just the poll
+// period.  A yield is the more common requeue on exactly the controllers polling
+// targets, and it is six times more frequent, so leaving it fixed would let the
+// convoy re-form on the yield path as fast as the poll path spread it.
+//
+// The jitter is added, never subtracted, so the duration is a floor: a caller
+// asking for a minute is never woken more often than once a minute.  Being a
+// random walk it decorrelates over tens of passes rather than immediately - the
+// first wake after start up is still fairly bunched - which is the price of
+// keeping the configured period meaning what it says.
+func jittered(d time.Duration) time.Duration {
+	// Covers the park case (zero) and any duration too small to divide, which
+	// matters because rand.N panics on a non-positive argument.
+	jitter := d / requeueJitterFraction
+	if jitter <= 0 {
+		return d
+	}
+
+	// A duration near the end of the int64 range would wrap to a negative, and
+	// controller-runtime reads a non-positive RequeueAfter as "done" - so an
+	// absurd period would silently stop the polling it configured.
+	if d > math.MaxInt64-jitter {
+		return d
+	}
+
+	// This picks a wake-up time, not a secret.  A predictable jitter is fine -
+	// the only thing it has to defeat is the fleet's own convoy, not an
+	// adversary - so the cost of a CSPRNG buys nothing here.
+	//nolint:gosec
+	return d + rand.N(jitter)
 }
 
 // handleReconcileCondition maps the outcome of a (de)provision — the error, or

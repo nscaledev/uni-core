@@ -40,8 +40,10 @@ flag surface for controller processes that use [pkg/manager](../README.md).
   every controller that has not opted in. A non-positive value is not a supported
   way to turn polling off: a polling reconciler falls back to
   `constants.DefaultRequeuePeriod` and logs it, because a polling controller that
-  never polls goes stale while still reporting success. Note the period also
-  interacts with
+  never polls goes stale while still reporting success. The period is a floor
+  rather than an exact interval: the reconciler adds up to a tenth of it as
+  jitter so the fleet decorrelates instead of re-observing in one burst. Note the
+  period also interacts with
   `MaxConcurrentReconciles`: a polling controller offers roughly one reconcile per
   resource per `RequeuePeriod` to a worker pool of `MaxConcurrentReconciles`, so a
   short period on a large fleet queues re-observations ahead of new work.

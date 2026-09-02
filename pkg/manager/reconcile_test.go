@@ -482,6 +482,25 @@ func managerOptionsWithRequeuePeriod() *options.Options {
 	return o
 }
 
+// assertJitteredRequeue asserts the reconciler asked to be requeued off the
+// given duration: that duration is the floor, and the jitter is bounded well
+// inside a second copy of it.  Used for both the poll period and the yield
+// timeout, because both go through jittered.
+//
+// The bound here is deliberately loose.  The exact jitter window is a package
+// internal (requeueJitterFraction is not visible from this test package), and
+// restating it as a literal would go quietly stale the moment the fraction
+// changed - looser than reality, so it would stop checking rather than fail.
+// The precise window is pinned by TestJitteredInWindow, which can see the
+// constant.  What belongs here is only that the reconciler routed this path
+// through jittered at all, and never below the floor.
+func assertJitteredRequeue(t *testing.T, d time.Duration, result reconcile.Result) {
+	t.Helper()
+
+	assert.GreaterOrEqual(t, result.RequeueAfter, d)
+	assert.Less(t, result.RequeueAfter, 2*d)
+}
+
 // TestReconcileCreateSuccessParks tests the default: a controller that has not
 // opted into polling parks on success and waits for a watch event.  This is the
 // regression guard that WithPolling changes nothing for existing controllers.
@@ -542,7 +561,7 @@ func TestReconcileCreatePolling(t *testing.T) {
 
 	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
 	assert.NoError(t, err)
-	assert.Equal(t, testRequeuePeriod, result.RequeueAfter)
+	assertJitteredRequeue(t, testRequeuePeriod, result)
 
 	// The status is unaffected by polling.
 	var resource unikornv1fake.ManagedResource
@@ -583,7 +602,7 @@ func TestReconcileCreatePollingZeroPeriod(t *testing.T) {
 
 	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
 	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+	assertJitteredRequeue(t, constants.DefaultRequeuePeriod, result)
 }
 
 // TestReconcileCreatePollingNegativePeriod covers the other non-positive case,
@@ -615,7 +634,7 @@ func TestReconcileCreatePollingNegativePeriod(t *testing.T) {
 
 	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
 	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+	assertJitteredRequeue(t, constants.DefaultRequeuePeriod, result)
 }
 
 // TestReconcileCreatePollingTerminal is the important one: polling must NOT
@@ -707,7 +726,7 @@ func TestReconcileCreatePollingYield(t *testing.T) {
 
 	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
 	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultYieldTimeout, result.RequeueAfter)
+	assertJitteredRequeue(t, constants.DefaultYieldTimeout, result)
 }
 
 // TestReconcileDeletePolling checks that polling does not reach the delete path.
