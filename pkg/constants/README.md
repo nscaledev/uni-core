@@ -8,7 +8,7 @@ Most of the package defines metadata contract shared across services, controller
 
 It also defines principal-prefixed metadata keys used when an intermediate service acts on a user's behalf and the platform still needs access to the original principal's identity context for attribution, quota, billing, or scoping decisions.
 
-The remainder of the package defines a few shared operational constants: the common finalizer token used by this management layer for explicit deletion control, the default yield timeout used for controlled retries, and the label-priority ordering used for specific label-tuple-based identity construction paths that need deterministic ordering from a map.
+The remainder of the package defines a few shared operational constants: the common finalizer token used by this management layer for explicit deletion control, the default yield timeout used for controlled retries, the default requeue period for polling controllers, and the label-priority ordering used for specific label-tuple-based identity construction paths that need deterministic ordering from a map.
 
 ## Invariants And Guard Rails
 
@@ -19,6 +19,7 @@ The remainder of the package defines a few shared operational constants: the com
 - `LabelPriorities()` defines the repository's canonical ordering for the label-tuple identity paths that depend on it. Callers should not invent local ordering rules for the same purpose.
 - `Finalizer` is the shared deletion-control token for this repository's management layer where cleanup requires explicit logic rather than raw Kubernetes garbage collection.
 - `DefaultYieldTimeout` is the shared default for controlled retry and yield behavior where reconciliation or provisioning work should back off and give another actor a turn.
+- `DefaultRequeuePeriod` is the default for how often a polling controller re-observes a settled resource, and the fallback when a polling controller is given a period of zero or less. It is inert for controllers that do not poll. See [pkg/manager](../manager/README.md).
 
 ## Caveats
 

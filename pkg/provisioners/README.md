@@ -23,7 +23,7 @@ why dispositions are sentinels, never prose.
 
 | Disposition | Returned by | Manager behaviour | Recovery |
 | --- | --- | --- | --- |
-| `nil` | success | mark `Available: Provisioned` | n/a |
+| `nil` | success | mark `Available: Provisioned`; a `WithPolling()` controller also requeues after the requeue period at `LowPriority` | n/a |
 | `ErrYield` | `ErrYield`, `Yield(reason, message)`, `DependencyNotReady`/`DependencyFailed` | write `Available: False`; requeue on the fixed yield timeout | next reconcile |
 | `ErrTerminal` | `Terminal(reason, message)`, `DependencyNotFound` | write `Available: False`; **stop requeuing** | operator intervention |
 | `ErrUserActionRequired` | `UserActionRequired(reason, message)` | write `Available: False`; **stop requeuing** | a spec change (generation bump) wakes the controller |
