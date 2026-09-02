@@ -21,6 +21,8 @@ package manager
 import (
 	"context"
 	"errors"
+	"hash/fnv"
+	"math"
 	"time"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
@@ -37,6 +39,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -69,10 +72,10 @@ type Reconciler struct {
 	// controllerOptions are options to be passed to the reconciler.
 	controllerOptions ControllerOptions
 
-	// requeuePeriod is how long a successful reconcile waits before revisiting
-	// the resource.  Zero means park and wait for a watch event.  WithPolling
-	// sets it once at construction, so the fallback is logged once, and it is
-	// then always positive.
+	// requeuePeriod is the spacing of the slots at which a successful reconcile
+	// revisits the resource.  Zero means park and wait for a watch event.
+	// WithPolling sets it once at construction, so the fallback is logged once,
+	// and it is then always positive.
 	requeuePeriod time.Duration
 }
 
@@ -80,10 +83,10 @@ type Reconciler struct {
 // breaking existing callers of NewReconciler.
 type ReconcilerOption func(*Reconciler)
 
-// WithPolling makes a successful reconcile requeue after the controller's
-// configured requeue period instead of parking until the next watch event, for
-// resources backed by an external system that moves on its own.  It is decided
-// in code, not by a flag, and a non-positive period falls back to
+// WithPolling makes a successful reconcile requeue to its next slot in the
+// controller's requeue period instead of parking until the next watch event,
+// for resources backed by an external system that moves on its own.  It is
+// decided in code, not by a flag, and a non-positive period falls back to
 // constants.DefaultRequeuePeriod.
 //
 // A polling controller MUST NOT return Terminal() for external-system state
@@ -329,7 +332,47 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 	// A requeue keeps the priority of the pass it came from, so set it or a
 	// poll could compete with new work.  See the README.
-	return reconcile.Result{RequeueAfter: r.requeuePeriod, Priority: ptr.To(handler.LowPriority)}, nil
+	return reconcile.Result{RequeueAfter: nextSlot(object.GetUID(), r.requeuePeriod, time.Now()), Priority: ptr.To(handler.LowPriority)}, nil
+}
+
+// minimumGapFraction sets the shortest wait nextSlot returns, as a fraction of
+// the period: 10 means a tenth.
+const minimumGapFraction = 10
+
+// nextSlot returns the wait until the resource's next slot in a period of d,
+// at an offset hashed from its UID.  The result is never zero, which would
+// park, and never under a tenth of d unless skipping a slot would overflow.  A
+// non-positive d is returned unchanged.  See the README's "Invariants And
+// Guard Rails" section.
+func nextSlot(uid types.UID, d time.Duration, now time.Time) time.Duration {
+	if d <= 0 {
+		return d
+	}
+
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(uid))
+
+	// Both are in [0, d), so neither the difference nor the wrap can overflow.
+	//nolint:gosec
+	offset := time.Duration(h.Sum64() % uint64(d))
+
+	phase := time.Duration(now.UnixNano()) % d
+	if phase < 0 {
+		phase += d
+	}
+
+	wait := offset - phase
+	if wait <= 0 {
+		wait += d
+	}
+
+	// Skip a slot that is too close.  The second test stops a period near the
+	// end of the int64 range overflowing to a negative, which would park.
+	if wait < d/minimumGapFraction && wait <= math.MaxInt64-d {
+		wait += d
+	}
+
+	return wait
 }
 
 // handleReconcileCondition maps the outcome of a (de)provision — the error, or
