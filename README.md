@@ -63,7 +63,7 @@ The general algorithm is:
   * Update the custom resource status conditions
   * If progress cannot continue, re-queue on the fixed yield timeout
   * If an unexpected error occurs, update status and still re-queue on the fixed timeout rather than returning a raw reconcile error
-  * Otherwise end reconciliation, unless the controller polls, in which case re-queue after the requeue period at low priority
+  * Otherwise end reconciliation, unless the controller polls, in which case re-queue at the resource's next slot in the requeue period, at low priority
 
 Like the core controller logic, the reconciler handles status conditions, regardless of the custom resource type, in a generic manner to provide consistency.
 

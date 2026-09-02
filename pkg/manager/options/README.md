@@ -40,13 +40,19 @@ flag surface for controller processes that use [pkg/manager](../README.md).
   every controller that has not opted in. A non-positive value is not a supported
   way to turn polling off: a polling reconciler falls back to
   `constants.DefaultRequeuePeriod` and logs it, because a polling controller that
-  never polls goes stale while still reporting success. Note the period also
-  interacts with
+  never polls goes stale while still reporting success. The period is the
+  spacing of each resource's slots, not a minimum gap: every resource is given a
+  fixed slot within the period from its UID, so the fleet re-observes spread
+  across the period rather than in one burst, and a pass after an out-of-band
+  wake can come sooner than a full period. Note the period also interacts with
   `MaxConcurrentReconciles`: a polling controller offers roughly one reconcile per
   resource per `RequeuePeriod` to a worker pool of `MaxConcurrentReconciles`. Polls
   are queued at low priority so they never get ahead of new work, but a period too
   short for the pool to keep up with leaves the fleet observed less often than
-  configured.
+  configured. Only non-positive values are replaced by the default, so
+  nothing stops a period short enough to hot-loop: keep it to tens of seconds
+  or more, and size it against the fleet (20k resources on a 1s period asks for
+  20k passes a second).
 - `CDDriver` exists because the manager layer still carries legacy in-tree CD
   integration and needs one common way to select that backend.
 

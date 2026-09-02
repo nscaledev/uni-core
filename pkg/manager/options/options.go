@@ -38,7 +38,7 @@ type Options struct {
 	// and may need to update the Helm limits.
 	MaxConcurrentReconciles int
 
-	// RequeuePeriod is how long a polling controller waits before revisiting a
+	// RequeuePeriod is the spacing of a polling controller's visits to a
 	// resource it has no further work for.  It is read only with
 	// manager.WithPolling, and a non-positive value falls back to
 	// constants.DefaultRequeuePeriod rather than turning polling off.  See
@@ -56,6 +56,6 @@ func (o *Options) AddFlags(flags *pflag.FlagSet) {
 	o.CoreOptions.AddFlags(flags)
 
 	flags.IntVar(&o.MaxConcurrentReconciles, "max-concurrency", runtime.NumCPU(), "Maximum number of requests to process at the same time")
-	flags.DurationVar(&o.RequeuePeriod, "requeue-period", constants.DefaultRequeuePeriod, "Period after which a polling controller revisits a resource that needs no further work, ignored by controllers that do not poll")
+	flags.DurationVar(&o.RequeuePeriod, "requeue-period", constants.DefaultRequeuePeriod, "Spacing of a polling controller's visits to a resource that needs no further work, ignored by controllers that do not poll")
 	flags.Var(&o.CDDriver, "cd-driver", "CD backend driver to use from [argocd]")
 }

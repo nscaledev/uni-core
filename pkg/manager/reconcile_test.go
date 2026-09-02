@@ -47,10 +47,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -80,13 +82,28 @@ type testContext struct {
 func mustNewTestContext(t *testing.T, objects ...client.Object) *testContext {
 	t.Helper()
 
+	return mustNewTestContextWithInterceptor(t, interceptor.Funcs{}, objects...)
+}
+
+// mustNewTestContextWithInterceptor lets a test make client calls fail.
+func mustNewTestContextWithInterceptor(t *testing.T, funcs interceptor.Funcs, objects ...client.Object) *testContext {
+	t.Helper()
+
 	scheme, err := coreclient.NewScheme()
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// The fake client never sets a UID, and polls are slotted by UID, so
+	// without one a test cannot tell the resource's own slot from a constant.
+	for _, object := range objects {
+		if object.GetUID() == "" {
+			object.SetUID(uuid.NewUUID())
+		}
+	}
+
 	tc := &testContext{
-		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}).WithObjects(objects...).Build(),
+		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}).WithObjects(objects...).WithInterceptorFuncs(funcs).Build(),
 		scheme: scheme,
 	}
 
@@ -229,8 +246,7 @@ func TestReconcileCreateYield(t *testing.T) {
 
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
 
-	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
+	reconcileFlat(ctx, t, reconciler)
 
 	// Does the resource have all the correct metadata and status information set?
 	var result unikornv1fake.ManagedResource
@@ -484,6 +500,52 @@ func managerOptionsWithRequeuePeriod() *options.Options {
 	return o
 }
 
+// reconcileSlotted reconciles the test resource and asserts it was requeued to
+// its own slot in a period of d.  The pass ran at some instant between before
+// and after, so the requeue lands on the slot shifted earlier by at most that
+// window.  A flat d, or a slot from the wrong UID, fails.  It takes NextSlot as
+// the expected value, so it proves the right UID and period reach it and
+// relies on the slot unit tests for NextSlot itself being right.
+func reconcileSlotted(ctx context.Context, t *testing.T, tc *testContext, reconciler *manager.Reconciler, d time.Duration) reconcile.Result {
+	t.Helper()
+
+	// Round(0) drops the monotonic reading.  nextSlot works in wall time, so
+	// the window must too, or the two clocks disagree by microseconds.
+	before := time.Now().Round(0)
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	after := time.Now().Round(0)
+
+	assert.NoError(t, err)
+
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	assert.NotEmpty(t, resource.UID)
+
+	slot := before.Add(manager.NextSlot(resource.UID, d, before))
+	shift := (slot.Sub(before.Add(result.RequeueAfter))%d + d) % d
+
+	assert.LessOrEqual(t, shift, after.Sub(before))
+
+	// The modulo above cannot see a wait a whole period too long.
+	assert.GreaterOrEqual(t, result.RequeueAfter, d/10)
+	assert.LessOrEqual(t, result.RequeueAfter, d+d/10)
+
+	return result
+}
+
+// reconcileFlat reconciles the test resource and asserts it was requeued on
+// the flat yield timeout, as every retry is.  Only the poll is slotted.
+func reconcileFlat(ctx context.Context, t *testing.T, reconciler *manager.Reconciler) reconcile.Result {
+	t.Helper()
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Equal(t, constants.DefaultYieldTimeout, result.RequeueAfter)
+
+	return result
+}
+
 // TestReconcileCreateSuccessParks tests the default: a controller that has not
 // opted into polling parks on success and waits for a watch event.  This is the
 // regression guard that WithPolling changes nothing for existing controllers.
@@ -542,9 +604,7 @@ func TestReconcileCreatePolling(t *testing.T) {
 
 	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
 
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Equal(t, testRequeuePeriod, result.RequeueAfter)
+	result := reconcileSlotted(ctx, t, tc, reconciler, testRequeuePeriod)
 
 	// A poll must never queue ahead of new work, whatever woke this pass.
 	assert.Equal(t, ptr.To(handler.LowPriority), result.Priority)
@@ -586,9 +646,7 @@ func TestReconcileCreatePollingZeroPeriod(t *testing.T) {
 	// managerOptions leaves RequeuePeriod at its zero value.
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
 
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+	reconcileSlotted(ctx, t, tc, reconciler, constants.DefaultRequeuePeriod)
 }
 
 // TestReconcileCreatePollingNegativePeriod covers the other non-positive case,
@@ -618,9 +676,7 @@ func TestReconcileCreatePollingNegativePeriod(t *testing.T) {
 
 	reconciler := manager.NewReconciler(o, nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
 
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+	reconcileSlotted(ctx, t, tc, reconciler, constants.DefaultRequeuePeriod)
 }
 
 // TestReconcileCreatePollingTerminal is the important one: polling must NOT
@@ -710,12 +766,60 @@ func TestReconcileCreatePollingYield(t *testing.T) {
 
 	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
 
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Equal(t, constants.DefaultYieldTimeout, result.RequeueAfter)
+	result := reconcileFlat(ctx, t, reconciler)
 
 	// A yield sets no priority, so it inherits that of the pass it came from.
 	assert.Nil(t, result.Priority)
+}
+
+// TestReconcileSlotFromPassEnd checks the poll slot is worked out when the
+// pass ends.  Working it out from the start would shift every poll late by the
+// pass time and measure the minimum gap from the wrong instant.  An instant
+// pass cannot tell the two apart, so this pass takes a while.
+func TestReconcileSlotFromPassEnd(t *testing.T) {
+	t.Parallel()
+
+	const pass = 100 * time.Millisecond
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).DoAndReturn(func(_ context.Context) error {
+		time.Sleep(pass)
+
+		return nil
+	})
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	after := time.Now().Round(0)
+
+	assert.NoError(t, err)
+
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+
+	// The requeue fires at after plus the wait, give or take the time between
+	// the reconciler reading the clock and returning.  That must be on the
+	// slot to well within the length of the pass.
+	slot := after.Add(manager.NextSlot(resource.UID, testRequeuePeriod, after))
+	drift := (after.Add(result.RequeueAfter).Sub(slot)%testRequeuePeriod + testRequeuePeriod) % testRequeuePeriod
+
+	assert.Less(t, drift, pass/2)
 }
 
 // TestReconcileDeletePolling checks that polling does not reach the delete path.
@@ -826,8 +930,7 @@ func TestReconcileDeleteYield(t *testing.T) {
 
 	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
 
-	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
+	reconcileFlat(ctx, t, reconciler)
 
 	// Does the resource still exist in Kubernetes?
 	var result unikornv1fake.ManagedResource
@@ -1004,4 +1107,115 @@ func TestReconcileDeleteError(t *testing.T) {
 	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
 	assert.Contains(t, result.Finalizers, constants.Finalizer)
 	mustAssertStatus(t, &result, corev1.ConditionFalse, unikornv1.ConditionReasonErrored)
+}
+
+// failStatusUpdate makes every status write fail.
+func failStatusUpdate(_ context.Context, _ client.Client, _ string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
+	return errUnhandled
+}
+
+// failUpdate makes every object write fail.
+func failUpdate(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
+	return errUnhandled
+}
+
+// TestReconcileCreateStatusUpdateFailed checks a failed status write on the
+// provision path is retried on the flat yield timeout.
+func TestReconcileCreateStatusUpdateFailed(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+		},
+	}
+
+	tc := mustNewTestContextWithInterceptor(t, interceptor.Funcs{SubResourceUpdate: failStatusUpdate}, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	reconcileFlat(ctx, t, reconciler)
+}
+
+// TestReconcileDeleteStatusUpdateFailed checks a failed status write on the
+// deprovision path is retried on the flat yield timeout.
+func TestReconcileDeleteStatusUpdateFailed(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+			DeletionTimestamp: &metav1.Time{
+				Time: time.Now(),
+			},
+		},
+	}
+
+	tc := mustNewTestContextWithInterceptor(t, interceptor.Funcs{SubResourceUpdate: failStatusUpdate}, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Deprovision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	reconcileFlat(ctx, t, reconciler)
+}
+
+// TestReconcileDeleteFinalizerRemovalFailed checks a failed finalizer removal
+// is retried on the flat yield timeout, and the resource is kept.
+func TestReconcileDeleteFinalizerRemovalFailed(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+			DeletionTimestamp: &metav1.Time{
+				Time: time.Now(),
+			},
+		},
+	}
+
+	tc := mustNewTestContextWithInterceptor(t, interceptor.Funcs{Update: failUpdate}, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Deprovision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	reconcileFlat(ctx, t, reconciler)
+
+	var result unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &result))
+	assert.Contains(t, result.Finalizers, constants.Finalizer)
 }
