@@ -45,6 +45,34 @@ type ReconcilePauser interface {
 	Paused() bool
 }
 
+// GenerationProcessor is implemented by resources that record the last spec
+// generation their controller finished working on, so that a restart does not
+// redo work that is already done.
+//
+// This is deliberately NOT part of ManagableResourceInterface.  It is opt in per
+// type, asserted at runtime, because it answers "has the spec changed?" - which
+// is only the same question as "is there anything to do?" for a resource whose
+// spec is the only thing that moves it.
+//
+// While a controller is down it receives no watch events, so the create event it
+// gets when the informer lists on start up is its only chance to notice what
+// changed in that window.  A resource that tracks something else - another
+// service's resource, or a provider that moves on its own - therefore has real
+// work to do on every restart, and must not implement this.
+//
+// See manager.GenerationUnprocessed, the watch predicate that consumes it.
+//
+// Zero means never processed.  A live resource starts at generation 1, so the
+// zero value correctly reads as outstanding work.
+type GenerationProcessor interface {
+	// ProcessedGeneration returns the last spec generation the controller
+	// finished with, or zero if it has never finished one.
+	ProcessedGeneration() int64
+
+	// SetProcessedGeneration records a generation as finished with.
+	SetProcessedGeneration(generation int64)
+}
+
 // StatusConditionReader allows generic status conditions to be read.
 type StatusConditionReader interface {
 	// StatusConditionRead scans the status conditions for an existing condition

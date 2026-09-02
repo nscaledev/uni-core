@@ -41,3 +41,27 @@ func (r *ManagedResource) StatusConditionRead(t unikornv1.ConditionType) (*metav
 func (r *ManagedResource) SetProvisioningCondition(status corev1.ConditionStatus, reason unikornv1.ProvisioningConditionReason, message string) {
 	unikornv1.UpdateCondition(&r.Status.Conditions, unikornv1.ConditionAvailable, status, string(reason), message)
 }
+
+func (r *GenerationalResource) ResourceLabels() (labels.Set, error) {
+	return labels.Set(r.Labels), nil
+}
+
+func (r *GenerationalResource) Paused() bool {
+	return false
+}
+
+func (r *GenerationalResource) StatusConditionRead(t unikornv1.ConditionType) (*metav1.Condition, error) {
+	return unikornv1.GetCondition(r.Status.Conditions, t)
+}
+
+func (r *GenerationalResource) SetProvisioningCondition(status corev1.ConditionStatus, reason unikornv1.ProvisioningConditionReason, message string) {
+	unikornv1.UpdateCondition(&r.Status.Conditions, unikornv1.ConditionAvailable, status, string(reason), message)
+}
+
+func (r *GenerationalResource) ProcessedGeneration() int64 {
+	return r.Status.ProcessedGeneration
+}
+
+func (r *GenerationalResource) SetProcessedGeneration(generation int64) {
+	r.Status.ProcessedGeneration = generation
+}

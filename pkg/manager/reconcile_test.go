@@ -84,7 +84,7 @@ func mustNewTestContext(t *testing.T, objects ...client.Object) *testContext {
 	}
 
 	tc := &testContext{
-		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}).WithObjects(objects...).Build(),
+		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}, &unikornv1fake.GenerationalResource{}).WithObjects(objects...).Build(),
 		scheme: scheme,
 	}
 
@@ -763,6 +763,239 @@ func TestReconcileDeletePolling(t *testing.T) {
 	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
 	assert.NoError(t, err)
 	assert.Zero(t, result)
+}
+
+const (
+	// testGeneration is the spec generation under test, and
+	// testProcessedGeneration the one last finished with.  Non-zero and
+	// different: the fake client leaves generation at zero, which is not a state
+	// a live resource is ever in.
+	testGeneration          = 2
+	testProcessedGeneration = 1
+)
+
+// mustReconcileGenerational runs one pass against a resource that opts into
+// generation bookkeeping, and returns what was persisted.
+func mustReconcileGenerational(t *testing.T, provisionErr error) *unikornv1fake.GenerationalResource {
+	t.Helper()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.GenerationalResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  testNamespace,
+			Name:       testName,
+			Generation: testGeneration,
+		},
+		Status: unikornv1fake.GenerationalResourceStatus{
+			ProcessedGeneration: testProcessedGeneration,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.GenerationalResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisionErr)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	resource := &unikornv1fake.GenerationalResource{}
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), resource))
+
+	return resource
+}
+
+// TestReconcileGenerationStamped checks a finished pass records the generation,
+// which is what lets the next start up filter the resource out.
+func TestReconcileGenerationStamped(t *testing.T) {
+	t.Parallel()
+
+	resource := mustReconcileGenerational(t, nil)
+
+	assert.Equal(t, int64(testGeneration), resource.Status.ProcessedGeneration)
+	mustAssertStatus(t, resource, corev1.ConditionTrue, unikornv1.ConditionReasonProvisioned)
+}
+
+// TestReconcileGenerationYieldDoesNotStamp checks the rule is intent, not
+// success.  A yield has scheduled another pass, so the generation is not
+// finished with; stamping would leave a half provisioned resource reading as
+// settled and filtered out on the next start.
+func TestReconcileGenerationYieldDoesNotStamp(t *testing.T) {
+	t.Parallel()
+
+	resource := mustReconcileGenerational(t, provisioners.ErrYield)
+
+	assert.Equal(t, int64(testProcessedGeneration), resource.Status.ProcessedGeneration)
+}
+
+// TestReconcileGenerationErrorDoesNotStamp checks the same for an unexpected
+// error, which is also retried.
+func TestReconcileGenerationErrorDoesNotStamp(t *testing.T) {
+	t.Parallel()
+
+	resource := mustReconcileGenerational(t, errUnhandled)
+
+	assert.Equal(t, int64(testProcessedGeneration), resource.Status.ProcessedGeneration)
+}
+
+// TestReconcileGenerationTerminalDoesNotStamp covers both parking dispositions.
+// Neither stamps, and that is what keeps a redeploy a recovery route: both park,
+// so nothing retries them in process, and stamping would additionally filter
+// them out of every future start up - turning "parked until something changes"
+// into "parked forever", exactly when the controller's own judgement was wrong.
+// A provisioner bug that misclassified valid specs would otherwise stamp the
+// whole affected fleet, and fixing the bug would not re-drive any of it.
+func TestReconcileGenerationTerminalDoesNotStamp(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "operator recoverable", err: provisioners.Terminal(unikornv1.ConditionReasonDependencyNotFound, "gone")},
+		{name: "user recoverable", err: provisioners.UserActionRequired(unikornv1.ConditionReasonErrored, "fix your spec")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			resource := mustReconcileGenerational(t, test.err)
+
+			assert.Equal(t, int64(testProcessedGeneration), resource.Status.ProcessedGeneration)
+		})
+	}
+}
+
+// TestReconcileGenerationPollingNeverStamps closes a total, silent failure.
+// Polling is self sustaining - each finished pass schedules the next through
+// RequeueAfter, and the informer's start up create event is the only thing that
+// starts the chain.  If a consumer wired GenerationUnprocessed onto a polling
+// controller and the generation were stamped, every settled resource would be
+// filtered at list time, reconcileNormal would never run, nothing would ever be
+// requeued, and the controller would observe nothing at all while reporting
+// healthy.  Never stamping leaves the comparison permanently unmatched, so the
+// predicate filters nothing and the two compose to a no-op.
+func TestReconcileGenerationPollingNeverStamps(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.GenerationalResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  testNamespace,
+			Name:       testName,
+			Generation: testGeneration,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.GenerationalResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assertJitteredRequeue(t, testRequeuePeriod, result)
+
+	var resource unikornv1fake.GenerationalResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+
+	// Left at zero, so GenerationUnprocessed can never match and never filters.
+	assert.Zero(t, resource.Status.ProcessedGeneration)
+}
+
+// TestReconcileGenerationDeprovisionNeverStamps pins the first guard in
+// markProcessed.  A resource on its way out has nothing that would read the
+// field, and one that reads as settled while half deleted is a worse thing to
+// leave behind than one that reconciles once more.
+func TestReconcileGenerationDeprovisionNeverStamps(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.GenerationalResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  testNamespace,
+			Name:       testName,
+			Generation: testGeneration,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+			DeletionTimestamp: &metav1.Time{
+				Time: time.Now(),
+			},
+		},
+		Status: unikornv1fake.GenerationalResourceStatus{
+			ProcessedGeneration: testProcessedGeneration,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.GenerationalResource{})
+	// Yield so the resource survives the pass and can be read back.
+	p.EXPECT().Deprovision(gomock.Any()).Return(provisioners.ErrYield)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	var resource unikornv1fake.GenerationalResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	assert.Equal(t, int64(testProcessedGeneration), resource.Status.ProcessedGeneration)
+}
+
+// TestReconcileGenerationNotProcessorUnaffected checks a resource that has not
+// opted in still reconciles normally and nothing tries to stamp it.
+func TestReconcileGenerationNotProcessorUnaffected(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  testNamespace,
+			Name:       testName,
+			Generation: 1,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	_, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	mustAssertStatus(t, &resource, corev1.ConditionTrue, unikornv1.ConditionReasonProvisioned)
 }
 
 // TestReconcileDelete checks that a resource marked as being deleted has the

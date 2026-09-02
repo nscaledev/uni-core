@@ -40,3 +40,30 @@ type ManagedResource struct {
 type ManagedResourceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type GenerationalResourceList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []GenerationalResource `json:"items"`
+}
+
+// GenerationalResource is a managed resource that also opts into generation
+// bookkeeping, i.e. implements v1alpha1.GenerationProcessor.  It exists
+// alongside ManagedResource rather than replacing it so both halves of the rule
+// are testable: a type that opts in can be skipped, and one that does not never
+// is.
+//
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type GenerationalResource struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Status            GenerationalResourceStatus `json:"status"`
+}
+
+type GenerationalResourceStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	ProcessedGeneration int64 `json:"processedGeneration,omitempty"`
+}

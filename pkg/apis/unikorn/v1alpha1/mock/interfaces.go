@@ -99,6 +99,56 @@ func (mr *MockReconcilePauserMockRecorder) Paused() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Paused", reflect.TypeOf((*MockReconcilePauser)(nil).Paused))
 }
 
+// MockGenerationProcessor is a mock of GenerationProcessor interface.
+type MockGenerationProcessor struct {
+	ctrl     *gomock.Controller
+	recorder *MockGenerationProcessorMockRecorder
+	isgomock struct{}
+}
+
+// MockGenerationProcessorMockRecorder is the mock recorder for MockGenerationProcessor.
+type MockGenerationProcessorMockRecorder struct {
+	mock *MockGenerationProcessor
+}
+
+// NewMockGenerationProcessor creates a new mock instance.
+func NewMockGenerationProcessor(ctrl *gomock.Controller) *MockGenerationProcessor {
+	mock := &MockGenerationProcessor{ctrl: ctrl}
+	mock.recorder = &MockGenerationProcessorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockGenerationProcessor) EXPECT() *MockGenerationProcessorMockRecorder {
+	return m.recorder
+}
+
+// ProcessedGeneration mocks base method.
+func (m *MockGenerationProcessor) ProcessedGeneration() int64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ProcessedGeneration")
+	ret0, _ := ret[0].(int64)
+	return ret0
+}
+
+// ProcessedGeneration indicates an expected call of ProcessedGeneration.
+func (mr *MockGenerationProcessorMockRecorder) ProcessedGeneration() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessedGeneration", reflect.TypeOf((*MockGenerationProcessor)(nil).ProcessedGeneration))
+}
+
+// SetProcessedGeneration mocks base method.
+func (m *MockGenerationProcessor) SetProcessedGeneration(generation int64) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetProcessedGeneration", generation)
+}
+
+// SetProcessedGeneration indicates an expected call of SetProcessedGeneration.
+func (mr *MockGenerationProcessorMockRecorder) SetProcessedGeneration(generation any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetProcessedGeneration", reflect.TypeOf((*MockGenerationProcessor)(nil).SetProcessedGeneration), generation)
+}
+
 // MockStatusConditionReader is a mock of StatusConditionReader interface.
 type MockStatusConditionReader struct {
 	ctrl     *gomock.Controller

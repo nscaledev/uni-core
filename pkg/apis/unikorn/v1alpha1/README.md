@@ -17,6 +17,13 @@ one part is legacy in-tree CD/application schema.
 - Generic managed-resource interfaces used by the controller/provisioner layer:
   `ResourceLabeller`, `ReconcilePauser`, `StatusConditionReader`,
   `StatusConditionWriter`, and `ManagableResourceInterface`.
+- `GenerationProcessor`, an *optional* interface a resource may implement to
+  record the last spec generation its controller finished with, so a restart can
+  drop the create event for work that is already done. Deliberately not part of
+  `ManagableResourceInterface`: it only makes sense where a restart has nothing
+  to catch up on, so it is opted into per type and asserted at runtime. See
+  [pkg/manager](../../../manager/README.md) for when to use it, and for the
+  `GenerationUnprocessed` watch predicate that consumes it.
 - Shared condition vocabulary and helpers:
   `Condition`, `ConditionType`, `ConditionReason`, `GetCondition()`,
   `UpdateCondition()`.

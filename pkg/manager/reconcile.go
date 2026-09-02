@@ -241,6 +241,66 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return r.reconcileNormal(ctx, provisioner, object)
 }
 
+// markProcessed records the current generation as finished with, so that
+// GenerationUnprocessed can drop the create event for it on the next start up.
+// Resources that do not implement GenerationProcessor are left alone.
+//
+// ONLY a success stamps.  Every failure is left outstanding, however terminal it
+// looks, and that asymmetry is deliberate rather than lazy.
+//
+// A yield or an unexpected error has scheduled another pass, so the generation
+// is plainly not finished with.  The terminal dispositions are the interesting
+// ones: both park, so nothing retries them in process, and stamping either would
+// mean the resource is also filtered out of every future start up.  That turns
+// "parked until something changes" into "parked forever", and it does so
+// precisely when the controller's own judgement was wrong - a provisioner bug
+// that misclassifies valid specs would stamp the whole affected fleet, and
+// fixing the bug would not re-drive any of it.  Leaving them unstamped costs one
+// wasted pass per parked resource per restart, which is a trivial price for
+// keeping a redeploy as a recovery route.
+//
+// Stickiness falls out of the same rule for free: the failure arms never touch
+// the field, so a transient error cannot drag a settled resource back onto the
+// expensive path.
+//
+// A deprovision never stamps.  The resource is on its way out, nothing would
+// read the field, and a half-deleted resource that reads as settled is a worse
+// thing to leave behind than one that reconciles once more.
+func (r *Reconciler) markProcessed(object unikornv1.ManagableResourceInterface, err error, deprovision bool) {
+	if deprovision {
+		return
+	}
+
+	// A polling controller never stamps, which is what makes wiring
+	// GenerationUnprocessed onto one harmless rather than catastrophic.
+	//
+	// Polling is self sustaining: each finished pass schedules the next through
+	// RequeueAfter, and the informer's start up create event is the only thing
+	// that starts that chain.  Filter that event and reconcileNormal never runs,
+	// so nothing is ever requeued, so the controller silently observes nothing
+	// for the life of the process while reporting perfectly healthy.
+	//
+	// Leaving the generation permanently unstamped means the predicate's
+	// comparison never matches and it filters nothing, so the two compose to a
+	// no-op instead.  Guarding here rather than in the predicate is deliberate:
+	// the predicate is wired by the consumer and cannot see how the reconciler
+	// was built, but the reconciler owns the data the predicate reads.
+	if r.requeuePeriod > 0 {
+		return
+	}
+
+	if err != nil {
+		return
+	}
+
+	processor, ok := object.(unikornv1.GenerationProcessor)
+	if !ok {
+		return
+	}
+
+	processor.SetProcessedGeneration(object.GetGeneration())
+}
+
 // reconcileDelete handles object deletion.
 // In the Deleting phase we wait for any references or dependencies to be cleaned.
 // In the Draining phase we hand off to the provision to clean up any resources.
@@ -509,6 +569,13 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		prior.Status != status ||
 		prior.Reason != reason ||
 		prior.Message != message
+
+	// Stamped here, not by the caller, so it lands in the same status write as
+	// the condition.  Written separately the two can tear: a condition saying
+	// provisioned with a generation still reading outstanding costs a redundant
+	// reconcile, and the reverse - settled generation, no condition - is a
+	// resource that reads as done having never reported it.
+	r.markProcessed(object, err, deprovision)
 
 	object.SetProvisioningCondition(status, reason, message)
 
