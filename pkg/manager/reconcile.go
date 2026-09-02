@@ -21,6 +21,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"time"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -36,8 +37,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -65,16 +68,58 @@ type Reconciler struct {
 
 	// controllerOptions are options to be passed to the reconciler.
 	controllerOptions ControllerOptions
+
+	// requeuePeriod is how long a successful reconcile waits before revisiting
+	// the resource.  Zero means park and wait for a watch event.  WithPolling
+	// sets it once at construction, so the fallback is logged once, and it is
+	// then always positive.
+	requeuePeriod time.Duration
+}
+
+// ReconcilerOption allows optional reconciler behaviour to be enabled without
+// breaking existing callers of NewReconciler.
+type ReconcilerOption func(*Reconciler)
+
+// WithPolling makes a successful reconcile requeue after the controller's
+// configured requeue period instead of parking until the next watch event, for
+// resources backed by an external system that moves on its own.  It is decided
+// in code, not by a flag, and a non-positive period falls back to
+// constants.DefaultRequeuePeriod.
+//
+// A polling controller MUST NOT return Terminal() for external-system state
+// that can recover on its own: nothing wakes a parked resource, so use Yield().
+// A paused resource is not polled, so unpausing MUST generate a watch event.
+// See the README's "Invariants And Guard Rails" section.
+func WithPolling() ReconcilerOption {
+	return func(r *Reconciler) {
+		// NewReconciler sets the options before applying these.
+		r.requeuePeriod = r.options.RequeuePeriod
+
+		// controller-runtime reads a non-positive RequeueAfter as "done", so a
+		// zero period would never poll.
+		if r.requeuePeriod <= 0 {
+			log.Log.WithName("manager").Info("requeue period is not positive, falling back to the default",
+				"configured", r.options.RequeuePeriod, "period", constants.DefaultRequeuePeriod)
+
+			r.requeuePeriod = constants.DefaultRequeuePeriod
+		}
+	}
 }
 
 // NewReconciler creates a new reconciler.
-func NewReconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager, createProvisioner ProvisionerCreateFunc) *Reconciler {
-	return &Reconciler{
+func NewReconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager, createProvisioner ProvisionerCreateFunc, reconcilerOptions ...ReconcilerOption) *Reconciler {
+	r := &Reconciler{
 		options:           options,
 		manager:           manager,
 		createProvisioner: createProvisioner,
 		controllerOptions: controllerOptions,
 	}
+
+	for _, o := range reconcilerOptions {
+		o(r)
+	}
+
+	return r
 }
 
 // Ensure this implements the reconcile.Reconciler interface.
@@ -276,7 +321,15 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 	log.Info("reconcile complete")
 
-	return reconcile.Result{}, nil
+	// Without WithPolling this is the unchanged park.  Terminal dispositions
+	// park above and never poll.
+	if r.requeuePeriod <= 0 {
+		return reconcile.Result{}, nil
+	}
+
+	// A requeue keeps the priority of the pass it came from, so set it or a
+	// poll could compete with new work.  See the README.
+	return reconcile.Result{RequeueAfter: r.requeuePeriod, Priority: ptr.To(handler.LowPriority)}, nil
 }
 
 // handleReconcileCondition maps the outcome of a (de)provision — the error, or
