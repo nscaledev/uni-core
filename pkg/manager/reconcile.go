@@ -21,6 +21,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"time"
 
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
@@ -65,16 +66,84 @@ type Reconciler struct {
 
 	// controllerOptions are options to be passed to the reconciler.
 	controllerOptions ControllerOptions
+
+	// requeuePeriod is how long a successful reconcile waits before revisiting
+	// the resource.  Zero - the default - means park and wait for a watch event.
+	// Set, and guaranteed positive, by WithPolling.
+	//
+	// This is resolved once at construction rather than read from options at use
+	// site so that the fallback below is applied and logged exactly once, not on
+	// every pass.  Run parses flags before building the reconciler, so there is
+	// nothing later to observe.
+	requeuePeriod time.Duration
+}
+
+// ReconcilerOption allows optional reconciler behaviour to be enabled without
+// breaking existing callers of NewReconciler.
+type ReconcilerOption func(*Reconciler)
+
+// WithPolling makes a successful reconcile requeue after the controller's
+// configured requeue period instead of parking until the next watch event.
+//
+// WHY: a controller whose resources are backed by an external system that moves
+// on its own - a cloud provider, say - cannot learn that the world has drifted
+// from a watch on its own CRDs, because nothing writes to them when the drift
+// happens.  Historically that gap was filled by a second process polling the
+// provider and patching status.  Two processes writing one resource's status is
+// a split brain: neither owns the conditions, transitions authored by one are
+// invisible to the other, and the writes churn or conflict.  Polling in the
+// reconcile pass instead means one writer, one read, one derivation.
+//
+// This is deliberately not a flag.  Whether a controller needs to poll is a
+// property of what it manages, not something an operator should be able to turn
+// off; only the period is tunable.  Configuration cannot defeat it either: a
+// non-positive period falls back to constants.DefaultRequeuePeriod rather than
+// silently parking, because a polling controller that never polls goes stale
+// while still reporting success.
+//
+// A polling controller must be careful with terminal dispositions, because
+// parking still means parking: there is no watch on the external system to
+// revive it, and ErrTerminal has no generation-bump wake either.  Never return
+// Terminal() for external-system state that can recover on its own - a provider
+// catalogue that blips during an update, say - or the resource stays parked long
+// after the fault has cleared.  Yield() is the disposition for anything the next
+// poll might find fixed.
+func WithPolling() ReconcilerOption {
+	return func(r *Reconciler) {
+		// NewReconciler populates the struct before applying options, so the
+		// options are readable here.
+		r.requeuePeriod = r.options.RequeuePeriod
+
+		// A polling controller with no period never polls, and does so silently:
+		// controller-runtime treats a non-positive RequeueAfter as "done", so the
+		// resource goes stale while continuing to report success.  Polling is a
+		// code-level decision about what backs the resource, so configuration must
+		// not be able to defeat it - and a zero period is reachable without anyone
+		// typing it, because Options can be built directly rather than through
+		// AddFlags.
+		if r.requeuePeriod <= 0 {
+			log.Log.WithName("manager").Info("requeue period is not positive, falling back to the default",
+				"configured", r.options.RequeuePeriod, "period", constants.DefaultRequeuePeriod)
+
+			r.requeuePeriod = constants.DefaultRequeuePeriod
+		}
+	}
 }
 
 // NewReconciler creates a new reconciler.
-func NewReconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager, createProvisioner ProvisionerCreateFunc) *Reconciler {
-	return &Reconciler{
+func NewReconciler(options *options.Options, controllerOptions ControllerOptions, manager manager.Manager, createProvisioner ProvisionerCreateFunc, reconcilerOptions ...ReconcilerOption) *Reconciler {
+	r := &Reconciler{
 		options:           options,
 		manager:           manager,
 		createProvisioner: createProvisioner,
 		controllerOptions: controllerOptions,
 	}
+
+	for _, o := range reconcilerOptions {
+		o(r)
+	}
+
+	return r
 }
 
 // Ensure this implements the reconcile.Reconciler interface.
@@ -276,7 +345,17 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 
 	log.Info("reconcile complete")
 
-	return reconcile.Result{}, nil
+	// requeuePeriod is zero unless WithPolling was given, and controller-runtime
+	// treats a zero RequeueAfter as "done", so this is the unchanged park for
+	// everything that has not opted in: the resource is level-triggered and a
+	// watch wakes it when the spec changes.  A polling controller instead
+	// revisits on a timer, because the external system backing it moves without
+	// writing to the resource and so generates no watch event.
+	//
+	// Note this deliberately does NOT apply to the terminal branch above.  A
+	// terminal disposition means the failure will not self-heal, so requeuing it
+	// is precisely the workqueue burn ErrTerminal exists to stop.
+	return reconcile.Result{RequeueAfter: r.requeuePeriod}, nil
 }
 
 // handleReconcileCondition maps the outcome of a (de)provision — the error, or

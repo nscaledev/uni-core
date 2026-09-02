@@ -468,6 +468,284 @@ func TestReconcileCreateTerminalWrapped(t *testing.T) {
 	assert.NotContains(t, condition.Message, outerProse)
 }
 
+// testRequeuePeriod is deliberately not a round minute so a test cannot pass by
+// accidentally matching the flag default.
+const testRequeuePeriod = 37 * time.Second
+
+// managerOptionsWithRequeuePeriod returns manager options carrying a requeue
+// period.  Deliberately used by both the polling and non-polling tests, because
+// half the point is that the period is inert unless polling is enabled.
+func managerOptionsWithRequeuePeriod() *options.Options {
+	o := managerOptions()
+	o.RequeuePeriod = testRequeuePeriod
+
+	return o
+}
+
+// TestReconcileCreateSuccessParks tests the default: a controller that has not
+// opted into polling parks on success and waits for a watch event.  This is the
+// regression guard that WithPolling changes nothing for existing controllers.
+func TestReconcileCreateSuccessParks(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	// Note the requeue period is set but polling is not enabled: the period must
+	// be ignored entirely, otherwise the flag default would silently change the
+	// behaviour of every controller that has not opted in.
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p })
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Zero(t, result)
+}
+
+// TestReconcileCreatePolling tests that a polling controller requeues on success
+// rather than parking, so it re-observes the external system that backs the
+// resource without a second process having to poll and patch status.
+func TestReconcileCreatePolling(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Equal(t, testRequeuePeriod, result.RequeueAfter)
+
+	// The status is unaffected by polling.
+	var resource unikornv1fake.ManagedResource
+
+	assert.NoError(t, tc.client.Get(ctx, newNamespacedName(testNamespace, testName), &resource))
+	mustAssertStatus(t, &resource, corev1.ConditionTrue, unikornv1.ConditionReasonProvisioned)
+}
+
+// TestReconcileCreatePollingZeroPeriod tests that configuration cannot silently
+// defeat the code-level decision to poll.  A zero period is reachable without
+// anyone typing it - Options can be built directly rather than through AddFlags,
+// which is exactly what managerOptions does here - and controller-runtime treats
+// a non-positive RequeueAfter as "done, forget it".  A polling controller that
+// never polls goes stale while still reporting success, which is the failure
+// mode polling exists to remove, so it falls back to the default instead.
+func TestReconcileCreatePollingZeroPeriod(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	// managerOptions leaves RequeuePeriod at its zero value.
+	reconciler := manager.NewReconciler(managerOptions(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+}
+
+// TestReconcileCreatePollingNegativePeriod covers the other non-positive case,
+// which controller-runtime treats identically to zero.
+func TestReconcileCreatePollingNegativePeriod(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(nil)
+
+	o := managerOptions()
+	o.RequeuePeriod = -1 * time.Second
+
+	reconciler := manager.NewReconciler(o, nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Equal(t, constants.DefaultRequeuePeriod, result.RequeueAfter)
+}
+
+// TestReconcileCreatePollingTerminal is the important one: polling must NOT
+// resurrect a parked resource.  A terminal disposition will not self-heal, so
+// requeuing it on a timer is precisely the workqueue burn ErrTerminal exists to
+// stop.  Revival stays out-of-band.
+func TestReconcileCreatePollingTerminal(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Terminal(unikornv1.ConditionReasonDependencyNotFound, "gone"))
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Zero(t, result)
+}
+
+// TestReconcileCreatePollingUserActionRequired covers the other terminal
+// disposition, which is revived by a spec change rather than an operator, and
+// must equally not be requeued by polling.
+func TestReconcileCreatePollingUserActionRequired(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.UserActionRequired(unikornv1.ConditionReasonErrored, "fix your spec"))
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Zero(t, result)
+}
+
+// TestReconcileCreatePollingYield tests that an in-progress reconcile keeps the
+// short yield timeout under polling.  The requeue period governs how often a
+// settled resource is re-observed, not how fast an unfinished one makes
+// progress, and conflating the two would slow every provision to the poll rate.
+func TestReconcileCreatePollingYield(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Provision(gomock.Any()).Return(provisioners.ErrYield)
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Equal(t, constants.DefaultYieldTimeout, result.RequeueAfter)
+}
+
+// TestReconcileDeletePolling checks that polling does not reach the delete path.
+// A successful deprovision removes the finalizer and the resource goes away, so
+// requeuing it would schedule work against an object that no longer exists.
+func TestReconcileDeletePolling(t *testing.T) {
+	t.Parallel()
+
+	c := gomock.NewController(t)
+	defer c.Finish()
+
+	request := &unikornv1fake.ManagedResource{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: testNamespace,
+			Name:      testName,
+			Finalizers: []string{
+				constants.Finalizer,
+			},
+			DeletionTimestamp: &metav1.Time{
+				Time: time.Now(),
+			},
+		},
+	}
+
+	tc := mustNewTestContext(t, request)
+	ctx := t.Context()
+
+	p := mockprovisioners.NewMockManagerProvisioner(c)
+	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
+	p.EXPECT().Deprovision(gomock.Any()).Return(nil)
+
+	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
+
+	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
+	assert.NoError(t, err)
+	assert.Zero(t, result)
+}
+
 // TestReconcileDelete checks that a resource marked as being deleted has the
 // finalizer removed and is cleaned up.
 func TestReconcileDelete(t *testing.T) {

@@ -162,6 +162,13 @@ const (
 	// and report a healthy status before yielding and giving someone else
 	// a go.
 	DefaultYieldTimeout = 10 * time.Second
+
+	// DefaultRequeuePeriod is how often a polling controller re-observes a
+	// resource it has no further work for.  It is both the flag default and the
+	// fallback used when a polling controller is handed a non-positive period,
+	// because a polling controller that never polls is silently stale, which is
+	// the failure mode polling exists to remove.
+	DefaultRequeuePeriod = time.Minute
 )
 
 // LabelPriorities assigns a priority to the labels for sorting.  Most things
