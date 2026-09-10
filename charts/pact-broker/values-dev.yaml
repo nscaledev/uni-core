@@ -2,7 +2,7 @@
 pact-broker:
   broker:
     config:
-      baseUrl: "https://pact.nks-dev.glo1.nscale.com"
+      baseUrl: "https://pact.uni-dev.glo1.nscale.com"
 
   ingress:
-    host: "pact.nks-dev.glo1.nscale.com"
+    host: "pact.uni-dev.glo1.nscale.com"

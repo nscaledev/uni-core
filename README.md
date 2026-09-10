@@ -294,7 +294,7 @@ For shared development and UAT environments, deploy the Pact Broker to your Kube
 
 **Deploy to Development Cluster**:
 ```bash
-# Deploy to nks-dev-glo1 cluster
+# Deploy to uni-dev-glo1 cluster
 make pact-broker-deploy-dev
 ```
 
@@ -314,7 +314,7 @@ make pact-broker-logs-k8s
 ```
 
 **Cluster URLs**:
-- **Dev**: https://pact.nks-dev.glo1.nscale.com (username: `pact`, password: `pact`)
+- **Dev**: https://pact.uni-dev.glo1.nscale.com (username: `pact`, password: `pact`)
 - **UAT**: https://pact.nks-uat.glo1.nscale.com (username: `pact`, password: `pact`)
 
 **Update Existing Deployment**:
