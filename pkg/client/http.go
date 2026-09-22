@@ -62,9 +62,9 @@ func (o *HTTPOptions) Host() string {
 
 // AddFlags adds the options to the CLI flags.
 func (o *HTTPOptions) AddFlags(f *pflag.FlagSet) {
-	f.StringVar(&o.host, o.service+"-host", "", "Identity endpoint URL.")
-	f.StringVar(&o.secretNamespace, o.service+"-ca-secret-namespace", "", "Identity endpoint CA certificate secret namespace.")
-	f.StringVar(&o.secretName, o.service+"-ca-secret-name", "", "Identity endpoint CA certificate secret.")
+	f.StringVar(&o.host, o.service+"-host", "", fmt.Sprintf("%s endpoint URL.", o.service))
+	f.StringVar(&o.secretNamespace, o.service+"-ca-secret-namespace", "", fmt.Sprintf("%s endpoint CA certificate secret namespace.", o.service))
+	f.StringVar(&o.secretName, o.service+"-ca-secret-name", "", fmt.Sprintf("%s endpoint CA certificate secret.", o.service))
 }
 
 // ApplyTLSConfig adds CA certificates to the TLS  configuration if one is specified.
@@ -101,24 +101,51 @@ func (o *HTTPOptions) ApplyTLSConfig(ctx context.Context, cli client.Client, con
 
 // HTTPClientOptions allows generic options to be passed to all HTTP clients.
 type HTTPClientOptions struct {
+	// service optionally prefixes the CLI flags.  The zero value is unprefixed.
+	service string
 	// secretNamespace tells us where to source the client certificate.
 	secretNamespace string
 	// secretName is the client certificate for the service.
 	secretName string
 }
 
+// NewHTTPClientOptions returns options whose flags are prefixed with the service
+// name, allowing a component to present a distinct client identity per peer.
+// The zero value is unprefixed and MUST retain the original flag names, as every
+// caller that needs only one client identity declares the type by value.
+func NewHTTPClientOptions(service string) *HTTPClientOptions {
+	return &HTTPClientOptions{
+		service: service,
+	}
+}
+
+// flag applies the service prefix to a flag name, if there is one.
+func (o *HTTPClientOptions) flag(name string) string {
+	if o.service == "" {
+		return name
+	}
+
+	return o.service + "-" + name
+}
+
 // AddFlags adds the options to the CLI flags.
 func (o *HTTPClientOptions) AddFlags(f *pflag.FlagSet) {
-	f.StringVar(&o.secretNamespace, "client-certificate-namespace", o.secretNamespace, "Client certificate secret namespace.")
-	f.StringVar(&o.secretName, "client-certificate-name", o.secretName, "Client certificate secret name.")
+	f.StringVar(&o.secretNamespace, o.flag("client-certificate-namespace"), o.secretNamespace, "Client certificate secret namespace.")
+	f.StringVar(&o.secretName, o.flag("client-certificate-name"), o.secretName, "Client certificate secret name.")
 
 	// Accepted and ignored: the certificate is reloaded on every handshake.  Deployments
 	// still pass this, and pflag rejects unknown flags, so removing it stops those pods
 	// starting.  Delete once no chart emits it.
-	f.Duration("client-certificate-reload-interval", 0, "Deprecated: ignored, the client certificate is reloaded on every handshake.")
+	//
+	// Unprefixed options only.  No deployment passes a prefixed form, and registering one
+	// per prefix would redefine this flag, which pflag panics on, in any process holding
+	// both a prefixed and an unprefixed client.
+	if o.service == "" {
+		f.Duration("client-certificate-reload-interval", 0, "Deprecated: ignored, the client certificate is reloaded on every handshake.")
 
-	if err := f.MarkDeprecated("client-certificate-reload-interval", "the client certificate is reloaded on every handshake"); err != nil {
-		panic(err)
+		if err := f.MarkDeprecated("client-certificate-reload-interval", "the client certificate is reloaded on every handshake"); err != nil {
+			panic(err)
+		}
 	}
 }
 

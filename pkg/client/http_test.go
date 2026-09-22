@@ -427,6 +427,105 @@ func TestHandshakeContextBoundsTheLoad(t *testing.T) {
 		"the load must not fall back to the flat load timeout")
 }
 
+// The flag help is operator facing, so it must name the service it configures
+// rather than whichever service happened to be the first caller.
+func TestHTTPOptionsFlagUsageNamesTheService(t *testing.T) {
+	t.Parallel()
+
+	options := coreclient.NewHTTPOptions("audit")
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	options.AddFlags(flags)
+
+	for _, name := range []string{"audit-host", "audit-ca-secret-namespace", "audit-ca-secret-name"} {
+		flag := flags.Lookup(name)
+		require.NotNil(t, flag, name)
+		require.NotContains(t, flag.Usage, "Identity", name)
+		require.Contains(t, flag.Usage, "audit", name)
+	}
+}
+
+func TestHTTPClientOptionsServicePrefixRegistersPrefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	scheme, err := coreclient.NewScheme()
+	require.NoError(t, err)
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mustTLSSecret(t, 1)).Build()
+
+	options := coreclient.NewHTTPClientOptions("audit")
+
+	flags := pflagSet(t, options)
+	require.NoError(t, flags.Parse([]string{
+		"--audit-client-certificate-namespace=test",
+		"--audit-client-certificate-name=client-cert",
+	}))
+
+	config := &tls.Config{MinVersion: tls.VersionTLS13}
+	require.NoError(t, options.ApplyTLSClientConfig(t.Context(), client, config))
+	require.NotNil(t, config.GetClientCertificate)
+
+	// Proves the prefixed flag values actually reached the secret loader, rather
+	// than the flags merely being registered.
+	certificate, err := config.GetClientCertificate(nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, serialNumber(t, certificate))
+}
+
+func TestHTTPClientOptionsServicePrefixDoesNotRegisterUnprefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	options := coreclient.NewHTTPClientOptions("audit")
+
+	flags := pflagSet(t, options)
+
+	require.Nil(t, flags.Lookup("client-certificate-namespace"))
+	require.Nil(t, flags.Lookup("client-certificate-name"))
+
+	// The deprecated flag exists only for deployments that already pass it, and
+	// none passes a prefixed form.
+	require.Nil(t, flags.Lookup("client-certificate-reload-interval"))
+	require.Nil(t, flags.Lookup("audit-client-certificate-reload-interval"))
+}
+
+// The zero value is how every existing caller declares these options, so the
+// unprefixed flag names must survive the addition of the service prefix.  The
+// leading-dash assertions guard the obvious naive-concatenation bug.
+func TestHTTPClientOptionsZeroValueKeepsUnprefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	options := &coreclient.HTTPClientOptions{}
+
+	flags := pflagSet(t, options)
+
+	require.NotNil(t, flags.Lookup("client-certificate-namespace"))
+	require.NotNil(t, flags.Lookup("client-certificate-name"))
+	require.NotNil(t, flags.Lookup("client-certificate-reload-interval"))
+
+	require.Nil(t, flags.Lookup("-client-certificate-namespace"))
+	require.Nil(t, flags.Lookup("-client-certificate-name"))
+	require.Nil(t, flags.Lookup("-client-certificate-reload-interval"))
+}
+
+// A service that talks to a peer needing its own identity registers both a
+// prefixed and an unprefixed set on one FlagSet.  pflag panics on a redefined
+// flag, so anything registered unconditionally must not be registered twice.
+func TestHTTPClientOptionsPrefixedAndUnprefixedCoexist(t *testing.T) {
+	t.Parallel()
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+
+	require.NotPanics(t, func() {
+		(&coreclient.HTTPClientOptions{}).AddFlags(flags)
+		coreclient.NewHTTPClientOptions("audit").AddFlags(flags)
+	})
+
+	require.NotNil(t, flags.Lookup("client-certificate-name"))
+	require.NotNil(t, flags.Lookup("audit-client-certificate-name"))
+}
+
 func mustHTTPClientOptions(t *testing.T) *coreclient.HTTPClientOptions {
 	t.Helper()
 
