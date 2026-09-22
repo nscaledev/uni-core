@@ -230,6 +230,84 @@ func TestApplyTLSClientConfigInitialLoadFailure(t *testing.T) {
 	require.Equal(t, 1, client.GetCount())
 }
 
+// The flag help is operator facing, so it must name the service it configures
+// rather than whichever service happened to be the first caller.
+func TestHTTPOptionsFlagUsageNamesTheService(t *testing.T) {
+	t.Parallel()
+
+	options := coreclient.NewHTTPOptions("audit")
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	options.AddFlags(flags)
+
+	for _, name := range []string{"audit-host", "audit-ca-secret-namespace", "audit-ca-secret-name"} {
+		flag := flags.Lookup(name)
+		require.NotNil(t, flag, name)
+		require.NotContains(t, flag.Usage, "Identity", name)
+		require.Contains(t, flag.Usage, "audit", name)
+	}
+}
+
+func TestHTTPClientOptionsServicePrefixRegistersPrefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	scheme, err := coreclient.NewScheme()
+	require.NoError(t, err)
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mustTLSSecret(t, 1)).Build()
+
+	options := coreclient.NewHTTPClientOptions("audit")
+
+	flags := pflagSet(t, options)
+	require.NoError(t, flags.Parse([]string{
+		"--audit-client-certificate-namespace=test",
+		"--audit-client-certificate-name=client-cert",
+		"--audit-client-certificate-reload-interval=1h",
+	}))
+
+	config := &tls.Config{MinVersion: tls.VersionTLS13}
+	require.NoError(t, options.ApplyTLSClientConfig(t.Context(), client, config))
+	require.NotNil(t, config.GetClientCertificate)
+
+	// Proves the prefixed flag values actually reached the secret loader, rather
+	// than the flags merely being registered.
+	certificate, err := config.GetClientCertificate(&tls.CertificateRequestInfo{})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), serialNumber(t, certificate))
+}
+
+func TestHTTPClientOptionsServicePrefixDoesNotRegisterUnprefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	options := coreclient.NewHTTPClientOptions("audit")
+
+	flags := pflagSet(t, options)
+
+	require.Nil(t, flags.Lookup("client-certificate-namespace"))
+	require.Nil(t, flags.Lookup("client-certificate-name"))
+	require.Nil(t, flags.Lookup("client-certificate-reload-interval"))
+}
+
+// The zero value is how every existing caller declares these options, so the
+// unprefixed flag names must survive the addition of the service prefix.  The
+// leading-dash assertions guard the obvious naive-concatenation bug.
+func TestHTTPClientOptionsZeroValueKeepsUnprefixedFlags(t *testing.T) {
+	t.Parallel()
+
+	options := &coreclient.HTTPClientOptions{}
+
+	flags := pflagSet(t, options)
+
+	require.NotNil(t, flags.Lookup("client-certificate-namespace"))
+	require.NotNil(t, flags.Lookup("client-certificate-name"))
+	require.NotNil(t, flags.Lookup("client-certificate-reload-interval"))
+
+	require.Nil(t, flags.Lookup("-client-certificate-namespace"))
+	require.Nil(t, flags.Lookup("-client-certificate-name"))
+	require.Nil(t, flags.Lookup("-client-certificate-reload-interval"))
+}
+
 func mustTLSClientConfig(t *testing.T, clock *staticClock, reloadInterval time.Duration, secret *corev1.Secret) (*tls.Config, *countingClient) {
 	t.Helper()
 
