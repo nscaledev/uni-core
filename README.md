@@ -291,6 +291,22 @@ For shared development and UAT environments, deploy the Pact Broker to your Kube
 **Prerequisites**:
 - Cluster access configured with `kubectl`
 - Helm 3 installed
+- namespace created against cluster (for example `kubectl create namespace pact-broker`)
+- a default StorageClass for the 8Gi PVC
+- an ingress controller answering to class `nginx`
+- Secrets created in namespace as per below.
+
+```
+kubectl -n pact-broker create secret generic pact-broker-db \
+  --from-literal=password='<DB_PASSWORD>' \
+  --from-literal=postgres-password='<DB_SUPERUSER_PASSWORD>'
+
+kubectl -n pact-broker create secret generic pact-broker-auth-write \
+  --from-literal=username='admin' --from-literal=password='<WRITE_PASSWORD>'
+
+kubectl -n pact-broker create secret generic pact-broker-auth-read \
+  --from-literal=username='reader' --from-literal=password='<READ_PASSWORD>'
+```
 
 **Deploy to Development Cluster**:
 ```bash
@@ -309,13 +325,23 @@ make pact-broker-deploy-uat
 # Check deployment status
 make pact-broker-status
 
+# Check ingress
+kubectl -n pact-broker get ingress pact-broker -o wide
+
+# Validate ingress
+curl -u admin:<WRITE_PASSWORD> https://pact.nks-dev.glo1.nscale.com
+# or
+curl -u admin:<WRITE_PASSWORD> https://pact.nks-stg.europe-west2.nscale.com
+
 # View logs
 make pact-broker-logs-k8s
 ```
 
 **Cluster URLs**:
-- **Dev**: https://pact.nks-dev.glo1.nscale.com (username: `pact`, password: `pact`)
-- **UAT**: https://pact.nks-uat.glo1.nscale.com (username: `pact`, password: `pact`)
+- **Dev**: https://pact.nks-dev.glo1.nscale.com
+- **UAT**: https://pact.nks-stg.europe-west2.nscale.com
+
+Credentials are whatever was set in the `pact-broker-auth-write` and `pact-broker-auth-read` secrets above; the chart does not define them.
 
 **Update Existing Deployment**:
 ```bash
