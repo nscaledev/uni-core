@@ -26,6 +26,7 @@ The context side is legacy provisioner plumbing. It carries the active provision
 - The HTTP client role here is transport and authentication support around internal generated clients, not API generation.
 - While this package still owns MTLS setup, it assumes certificate issuance and rotation are handled by an external system rather than by the client code itself.
 - TLS trust bundles and client certificates must come from correctly shaped `kubernetes.io/tls` secrets when using the current secret-backed MTLS path.
+- `HTTPClientOptions` flag names take an optional service prefix via `NewHTTPClientOptions()`, so one component can present a distinct client identity per peer. The zero value is unprefixed and must remain so: callers that need only one client identity declare the type by value, and renaming the unprefixed flags would move every flag already deployed.
 - Payload signing is part of the current internal trust model for principal propagation between services. It is not a generic invitation to invent new signed application protocols.
 - Context scoping in this package controls the active provisioning target. Descendant provisioners are expected to operate on the currently scoped cluster unless they explicitly reach back to the local provisioner client.
 - Context-based scoping is legacy CD-layer plumbing and should be treated as constrained internal machinery, not as a pattern to spread further.
