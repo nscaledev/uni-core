@@ -24,7 +24,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
@@ -35,9 +35,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
-
-const defaultClientCertificateReloadInterval = 24 * time.Hour
 
 // HTTPOptions are generic options for HTTP clients.
 type HTTPOptions struct {
@@ -106,92 +105,116 @@ type HTTPClientOptions struct {
 	secretNamespace string
 	// secretName is the client certificate for the service.
 	secretName string
-	// reloadInterval determines how often the client certificate is reloaded.
-	reloadInterval time.Duration
-	now            func() time.Time
 }
 
 // AddFlags adds the options to the CLI flags.
 func (o *HTTPClientOptions) AddFlags(f *pflag.FlagSet) {
 	f.StringVar(&o.secretNamespace, "client-certificate-namespace", o.secretNamespace, "Client certificate secret namespace.")
 	f.StringVar(&o.secretName, "client-certificate-name", o.secretName, "Client certificate secret name.")
-	f.DurationVar(&o.reloadInterval, "client-certificate-reload-interval", defaultClientCertificateReloadInterval, "How often to check for a rotated client certificate. Zero or negative disables periodic reload.")
-}
 
-// SetNow overrides the clock used for inline client certificate reload checks.
-func (o *HTTPClientOptions) SetNow(now func() time.Time) {
-	o.now = now
-}
+	// Accepted and ignored: the certificate is reloaded on every handshake.  Deployments
+	// still pass this, and pflag rejects unknown flags, so removing it stops those pods
+	// starting.  Delete once no chart emits it.
+	f.Duration("client-certificate-reload-interval", 0, "Deprecated: ignored, the client certificate is reloaded on every handshake.")
 
-func (o *HTTPClientOptions) clock() func() time.Time {
-	if o.now != nil {
-		return o.now
+	if err := f.MarkDeprecated("client-certificate-reload-interval", "the client certificate is reloaded on every handshake"); err != nil {
+		panic(err)
 	}
-
-	return time.Now
 }
 
+// tlsClientCertificateSource loads the client certificate for every handshake,
+// so a rotated CA or leaf takes effect without a restart.  MUST NOT cache on a
+// timer: a stale certificate is refused by the ingress once trust moves.  See
+// the README's client certificate section.
 type tlsClientCertificateSource struct {
-	mu sync.Mutex
-	// current is the last successfully loaded certificate and is retained across reload failures.
-	current *tls.Certificate
-	// nextCheck bounds reload attempts to avoid reloading on every handshake.
-	nextCheck      time.Time
-	reloadInterval time.Duration
-	now            func() time.Time
-	loader         func() (*tls.Certificate, error)
+	// current is the last successfully loaded certificate, served only when a
+	// reload fails so a transient read error does not fail the handshake.
+	current atomic.Pointer[tls.Certificate]
+	// lastFailureLog rate limits the failure log, as unix nanoseconds.  A Secret that
+	// cannot be read fails on every handshake, so logging each one floods.  An edge
+	// flag is not enough: an intermittent failure flips it every handshake, and two
+	// concurrent handshakes can apply their updates out of order and leave it set
+	// while healthy, swallowing the next genuine failure.
+	lastFailureLog atomic.Int64
+	// secret identifies this source in logs, as namespace/name.
+	secret string
+	load   func(context.Context) (*tls.Certificate, error)
 }
 
-type tlsClientCertificateReloader struct {
-	options *HTTPClientOptions
-	client  client.Client
+// clientCertificateFailureLogInterval is how often a sustained reload failure is
+// repeated in the log.  Silence would hide a service running on a certificate the
+// ingress will reject at the next rotation.
+const clientCertificateFailureLogInterval = time.Minute
+
+// clientCertificateLoadTimeout bounds a single load.  The Secret is normally read
+// from the controller-runtime cache and returns immediately, but callers may pass an
+// uncached client where this is an API round trip.  See the README.
+const clientCertificateLoadTimeout = 5 * time.Second
+
+// certificateLoader returns the function the source calls for each load.  The caller
+// supplies the context: the setup context at construction, and the handshake's own
+// context thereafter, so a caller that gives up waiting is not held here.  The load is
+// additionally capped, or a slow read with no deadline of its own hangs the handshake.
+func (o *HTTPClientOptions) certificateLoader(cli client.Client) func(context.Context) (*tls.Certificate, error) {
+	return func(ctx context.Context) (*tls.Certificate, error) {
+		ctx, cancel := context.WithTimeout(ctx, clientCertificateLoadTimeout)
+		defer cancel()
+
+		return o.loadTLSCertificate(ctx, cli)
+	}
 }
 
-func (r *tlsClientCertificateReloader) Load() (*tls.Certificate, error) {
-	// Reloads happen on future TLS handshakes, so reusing the setup context would make
-	// certificate refresh depend on whatever timeout/cancellation policy existed when
-	// the transport was constructed. A background context keeps reloads independent of
-	// that one-shot setup path. The tradeoff is that reloads are not currently time-bounded.
-	return r.options.loadTLSCertificate(context.Background(), r.client)
-}
-
-func newTLSClientCertificateSource(reloadInterval time.Duration, now func() time.Time, loader func() (*tls.Certificate, error)) (*tlsClientCertificateSource, error) {
-	certificate, err := loader()
+func newTLSClientCertificateSource(ctx context.Context, secret string, load func(context.Context) (*tls.Certificate, error)) (*tlsClientCertificateSource, error) {
+	certificate, err := load(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	source := &tlsClientCertificateSource{
-		current:        certificate,
-		reloadInterval: reloadInterval,
-		now:            now,
-		loader:         loader,
+		secret: secret,
+		load:   load,
 	}
 
-	if reloadInterval > 0 {
-		source.nextCheck = now().Add(reloadInterval)
-	}
+	source.current.Store(certificate)
 
 	return source, nil
 }
 
-func (s *tlsClientCertificateSource) GetClientCertificate(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// logFailure reports a reload failure at most once per interval.  Rate limiting
+// rather than edge triggering, for the reasons on lastFailureLog.
+func (s *tlsClientCertificateSource) logFailure(err error) {
+	now := time.Now().UnixNano()
+	last := s.lastFailureLog.Load()
 
-	if s.reloadInterval <= 0 {
-		return s.current, nil
+	if last != 0 && now-last < int64(clientCertificateFailureLogInterval) {
+		return
 	}
 
-	if s.now().Before(s.nextCheck) {
-		return s.current, nil
+	// Lost the race, so another handshake is logging this same failure.
+	if !s.lastFailureLog.CompareAndSwap(last, now) {
+		return
 	}
 
-	// Reload inline when the next handshake notices the check window has elapsed.
-	certificate, err := s.loader()
+	log.Log.Error(err, "client certificate reload failed, serving the last loaded certificate", "secret", s.secret)
+}
+
+// GetClientCertificate reloads on every handshake.  The load MUST NOT be held
+// under a lock: parsing an RSA 4096 key pair costs around a millisecond, which
+// would serialize concurrent handshakes.  See the README for the measurements.
+func (s *tlsClientCertificateSource) GetClientCertificate(request *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	// Honour the handshake's own deadline.  Without it a caller that has already
+	// given up still waits here for the full load timeout, on its own goroutine.
+	ctx := context.Background()
+	if request != nil && request.Context() != nil {
+		ctx = request.Context()
+	}
+
+	certificate, err := s.load(ctx)
 	if err != nil {
-		if s.current != nil {
-			return s.current, nil
+		s.logFailure(err)
+
+		if current := s.current.Load(); current != nil {
+			return current, nil
 		}
 
 		// The source preloads a certificate during construction, so this is a defensive
@@ -199,10 +222,14 @@ func (s *tlsClientCertificateSource) GetClientCertificate(*tls.CertificateReques
 		return nil, err
 	}
 
-	s.current = certificate
-	s.nextCheck = s.now().Add(s.reloadInterval)
+	// Concurrent handshakes across a rotation can store an older certificate after a
+	// newer one.  Every handshake returns what it loaded itself, and only the failure
+	// fallback reads this, so the cost is that the fallback may be one generation
+	// stale until the next successful load.  MUST NOT be ordered with a lock, which
+	// would serialize handshakes.
+	s.current.Store(certificate)
 
-	return s.current, nil
+	return certificate, nil
 }
 
 func (o *HTTPClientOptions) loadTLSCertificate(ctx context.Context, cli client.Client) (*tls.Certificate, error) {
@@ -241,13 +268,7 @@ func (o *HTTPClientOptions) ApplyTLSClientConfig(ctx context.Context, cli client
 		return nil
 	}
 
-	reloader := &tlsClientCertificateReloader{
-		options: o,
-		client:  cli,
-	}
-
-	// Reloads happen during future TLS handshakes, so they must not depend on the setup context.
-	source, err := newTLSClientCertificateSource(o.reloadInterval, o.clock(), reloader.Load)
+	source, err := newTLSClientCertificateSource(ctx, o.secretNamespace+"/"+o.secretName, o.certificateLoader(cli))
 	if err != nil {
 		return err
 	}
