@@ -19,23 +19,41 @@ package options
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"slices"
+	"sync"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/spf13/pflag"
 	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.22.0"
+	"google.golang.org/protobuf/proto"
 
 	klog "k8s.io/klog/v2"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+)
+
+// ServiceLabel is the label SetupMetrics adds to every scraped series, naming
+// the service that emitted it. Dashboards and alerts select services by it.
+const ServiceLabel = "service"
+
+var (
+	errMetricsSetUp = errors.New("metrics are already set up")
+	errNoService    = errors.New("a service name is required")
 )
 
 // CoreOptions are things all controllers, message consumers and servers will need.
@@ -71,7 +89,28 @@ func (o *CoreOptions) SetupLogging() {
 	otel.SetLogger(logr)
 }
 
-func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.TracerProviderOption) error {
+// SetupTracing sets the global trace propagator and tracer provider, exporting
+// traces when an OTLP endpoint is set. Traces are named by service, which
+// takes precedence over OTEL_SERVICE_NAME.
+func (o *CoreOptions) SetupTracing(ctx context.Context, service string, opts ...trace.TracerProviderOption) error {
+	if service == "" {
+		return errNoService
+	}
+
+	named, err := serviceResource(resource.Default(), service)
+	if err != nil {
+		return err
+	}
+
+	return o.setupTracing(ctx, append([]trace.TracerProviderOption{trace.WithResource(named)}, opts...)...)
+}
+
+// serviceResource names base by service, replacing any service name it has.
+func serviceResource(base *resource.Resource, service string) (*resource.Resource, error) {
+	return resource.Merge(base, resource.NewSchemaless(semconv.ServiceName(service)))
+}
+
+func (o *CoreOptions) setupTracing(ctx context.Context, opts ...trace.TracerProviderOption) error {
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	if o.OTLPEndpoint != "" {
@@ -94,27 +133,155 @@ func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.Trac
 
 	otel.SetTracerProvider(trace.NewTracerProvider(opts...))
 
-	meterOpts := []sdkmetric.Option{}
+	return nil
+}
 
-	if o.OTLPEndpoint != "" {
-		metricExporter, err := otlpmetrichttp.New(ctx,
-			otlpmetrichttp.WithEndpoint(o.OTLPEndpoint),
-			otlpmetrichttp.WithInsecure(),
-		)
+// meterProviderOnce lets SetupOpenTelemetry or SetupMetrics install the global
+// meter provider once per process. Instruments are bound to the provider
+// current when they are created, so a second provider would split them.
+//
+//nolint:gochecknoglobals
+var meterProviderOnce sync.Once
+
+// installMeterProvider runs setup if no meter provider has been installed, and
+// fails otherwise.
+func installMeterProvider(setup func() error) error {
+	err := errMetricsSetUp
+
+	meterProviderOnce.Do(func() { err = setup() })
+
+	return err
+}
+
+// SetupOpenTelemetry sets up tracing, and a meter provider that pushes OTel
+// instruments and the controller-runtime metrics when an OTLP endpoint is set.
+// It fails after SetupMetrics.
+//
+// Deprecated: Use SetupTracing and SetupMetrics, so metrics are scraped rather
+// than pushed. Pushed copies lack namespace, pod and service labels and
+// duplicate the scraped series.
+func (o *CoreOptions) SetupOpenTelemetry(ctx context.Context, opts ...trace.TracerProviderOption) error {
+	if err := o.setupTracing(ctx, opts...); err != nil {
+		return err
+	}
+
+	return installMeterProvider(func() error {
+		provider, err := newPushProvider(ctx, o.OTLPEndpoint, ctrlmetrics.Registry)
 		if err != nil {
 			return err
 		}
 
-		bridge := prombridge.NewMetricProducer(prombridge.WithGatherer(ctrlmetrics.Registry))
+		otel.SetMeterProvider(provider)
 
-		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExporter,
-			sdkmetric.WithProducer(bridge),
-		)))
+		return nil
+	})
+}
+
+// newPushProvider returns a meter provider that, when endpoint is set, pushes
+// its instruments and the series gathered from registry over OTLP.
+func newPushProvider(ctx context.Context, endpoint string, registry ctrlmetrics.RegistererGatherer) (*sdkmetric.MeterProvider, error) {
+	if endpoint == "" {
+		return sdkmetric.NewMeterProvider(), nil
 	}
 
-	otel.SetMeterProvider(sdkmetric.NewMeterProvider(meterOpts...))
+	exporter, err := otlpmetrichttp.New(ctx,
+		otlpmetrichttp.WithEndpoint(endpoint),
+		otlpmetrichttp.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
 
-	return nil
+	bridge := prombridge.NewMetricProducer(prombridge.WithGatherer(registry))
+
+	return sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter,
+		sdkmetric.WithProducer(bridge),
+	))), nil
+}
+
+// SetupMetrics sets a global meter provider whose instruments are exported on
+// the controller-runtime registry, so they are scraped along with the
+// controller-runtime metrics. Nothing is pushed. Every scraped series is
+// labelled with service, so call it before the registry is served.
+//
+// It fails if called again, or after SetupOpenTelemetry.
+func (o *CoreOptions) SetupMetrics(service string) error {
+	if service == "" {
+		return errNoService
+	}
+
+	return installMeterProvider(func() error {
+		provider, registry, err := newScrapeProvider(ctrlmetrics.Registry, service)
+		if err != nil {
+			return err
+		}
+
+		ctrlmetrics.Registry = registry
+
+		otel.SetMeterProvider(provider)
+
+		return nil
+	})
+}
+
+// newScrapeProvider returns a meter provider whose instruments are gathered
+// from registry, and registry wrapped to label every gathered series with
+// service.
+func newScrapeProvider(registry ctrlmetrics.RegistererGatherer, service string) (*sdkmetric.MeterProvider, ctrlmetrics.RegistererGatherer, error) {
+	labelled := &serviceRegistry{
+		RegistererGatherer: registry,
+		label:              &dto.LabelPair{Name: proto.String(ServiceLabel), Value: proto.String(service)},
+	}
+
+	exporter, err := prometheus.New(prometheus.WithRegisterer(labelled))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter)), labelled, nil
+}
+
+// serviceRegistry adds the service label to every gathered series that does
+// not already have one. Controller-runtime's metrics server gathers whatever
+// ctrlmetrics.Registry is when it starts, so this covers its own metrics as
+// well as OTel instruments.
+type serviceRegistry struct {
+	ctrlmetrics.RegistererGatherer
+
+	label *dto.LabelPair
+}
+
+func (r *serviceRegistry) Gather() ([]*dto.MetricFamily, error) {
+	families, err := r.RegistererGatherer.Gather()
+
+	for _, family := range families {
+		for _, metric := range family.GetMetric() {
+			if slices.ContainsFunc(metric.GetLabel(), func(l *dto.LabelPair) bool { return l.GetName() == ServiceLabel }) {
+				continue
+			}
+
+			metric.Label = append(metric.Label, r.label)
+		}
+	}
+
+	return families, err
+}
+
+// ServeMetrics serves the controller-runtime registry at /metrics on
+// bindAddress, as a controller-runtime manager does, for processes that don't
+// run a manager. An empty address means :8080, and "0" disables the server.
+// It blocks until the context is done.
+func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) error {
+	server, err := metricsserver.NewServer(metricsserver.Options{BindAddress: bindAddress}, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	if server == nil {
+		return nil
+	}
+
+	return server.Start(ctx)
 }
 
 // ServerOptions are shared across all servers.

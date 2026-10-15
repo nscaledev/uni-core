@@ -14,14 +14,15 @@ This package is where several lower-level ideas become enforceable runtime polic
 
 In practice `pkg/manager` does three jobs:
 
-- bootstraps controller processes through `Run(f ControllerFactory)`
+- bootstraps controller processes through `RunService(service, f)`, or the deprecated `Run(f)`
 - implements the generic reconcile loop through `Reconciler`
 - manages cross-resource deletion ordering through resource-reference helper functions
 
 ## Invariants And Guard Rails
 
 - `ControllerFactory` is the top-level integration contract for controller binaries built on this package.
-- `Run(f ControllerFactory)` is framework bootstrap code, not a generic library helper. It owns flag wiring, logging, OpenTelemetry setup, optional upgrade/initialize hooks, manager creation, controller creation, watch registration, and process startup.
+- `Run()` and `RunService()` are framework bootstrap code, not generic library helpers. They own flag wiring, logging, OpenTelemetry setup, optional upgrade/initialize hooks, manager creation, controller creation, watch registration, and process startup.
+- `Run()` is deprecated: it pushes metrics through the deprecated `SetupOpenTelemetry()`. `RunService()` calls `SetupTracing()` and `SetupMetrics()` with its service name instead, so metrics are only scraped from the manager's metrics endpoint.
 - `Reconciler` is the shared reconcile-policy implementation for manager-style resources. It injects the shared execution context that descendant provisioners depend on before invoking them.
 - That injected context includes:
   - manager access via `pkg/manager`
