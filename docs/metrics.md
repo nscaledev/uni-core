@@ -19,6 +19,18 @@ The shared PodMonitor adds, as for any scraped pod:
 
 - `namespace`, `pod` and `container`, to tell replicas and binaries apart.
 
+API servers using core's `metrics` middleware also expose the same RED
+metrics, with the same names and labels in every service:
+
+- `http_server_request_duration_seconds{route,method,status_class}`, a
+  histogram in seconds with buckets 0.005 to 10. Its `_count` is the
+  request count.
+- `http_server_active_requests{route,method}`.
+
+`route` is the OpenAPI route template, or `unmatched` for a request that
+matches no route. `method` is a standard HTTP method or `_OTHER`.
+`status_class` is `2xx`, `4xx`, `5xx` and so on.
+
 Not part of the contract, so don't select on them:
 
 - `job` and `instance`. The scraper sets them, and they differ between
@@ -55,7 +67,9 @@ Points to be aware of:
    `SetupOpenTelemetry(ctx)` with `SetupTracing(ctx, constants.Service)`
    and `SetupMetrics(constants.Service)`, called before any instrument is
    created. Then run `ServeMetrics(ctx, addr)`, on an address that
-   doesn't clash with the API listener.
+   doesn't clash with the API listener. API servers also add core's
+   `metrics` middleware immediately before `routeresolver` (see
+   `pkg/server/middleware/README.md`).
 5. In the chart, every pod that serves metrics:
    - names its metrics container port `prometheus`, which the shared
      PodMonitor scrapes;
