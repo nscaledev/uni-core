@@ -30,34 +30,88 @@ import (
 	"github.com/unikorn-cloud/core/pkg/util"
 )
 
+// allowAllOrigins is the wildcard the CORS specification defines for "any
+// origin", as distinct from an origin pattern that merely contains a "*".
+const allowAllOrigins = "*"
+
 type Options struct {
 	AllowedOrigins []string
 	MaxAge         int
 }
 
 func (o *Options) AddFlags(f *pflag.FlagSet) {
-	f.StringSliceVar(&o.AllowedOrigins, "cors-allow-origin", []string{"*"}, "CORS allowed origins")
+	f.StringSliceVar(&o.AllowedOrigins, "cors-allow-origin", []string{"*"}, "CORS allowed origins, each optionally containing a single \"*\" wildcard matching zero or more characters, e.g. https://*.example.com")
 	f.IntVar(&o.MaxAge, "cors-max-age", 86400, "CORS maximum age (may be overridden by the browser)")
+}
+
+// wildcardOrigin is an allowed origin containing a "*", split around it.  A
+// candidate matches when it starts with the prefix and ends with the suffix,
+// so "https://*.example.com" admits "https://a.example.com" but not
+// "https://a.example.com.attacker.test", whose suffix differs.
+type wildcardOrigin struct {
+	prefix string
+	suffix string
+}
+
+func (o *wildcardOrigin) matches(origin string) bool {
+	// Reject candidates too short to hold both halves, otherwise the prefix and
+	// suffix could satisfy themselves from overlapping text: "abc*bcd" would
+	// match "abcd".
+	if len(origin) < len(o.prefix)+len(o.suffix) {
+		return false
+	}
+
+	return strings.HasPrefix(origin, o.prefix) && strings.HasSuffix(origin, o.suffix)
 }
 
 type CORS struct {
 	options *Options
+
+	// wildcards holds the parsed form of every entry in the options that
+	// contains a "*", precomputed here so matching stays allocation free.
+	wildcards []wildcardOrigin
 }
 
 func New(options *Options) *CORS {
-	return &CORS{
+	c := &CORS{
 		options: options,
 	}
-}
 
-func (c *CORS) setAllowOrigin(w http.ResponseWriter, r *http.Request) {
-	if origin := r.Header.Get("Origin"); origin != "" {
-		if index := slices.IndexFunc(c.options.AllowedOrigins, func(s string) bool { return s == origin }); index >= 0 {
-			w.Header().Add("Access-Control-Allow-Origin", origin)
-			return
+	for _, origin := range options.AllowedOrigins {
+		// A bare "*" keeps its established "allow anything" meaning and is
+		// emitted verbatim by the fallback below, so it is not a wildcard.
+		if origin == allowAllOrigins {
+			continue
+		}
+
+		if prefix, suffix, found := strings.Cut(origin, "*"); found {
+			c.wildcards = append(c.wildcards, wildcardOrigin{prefix: prefix, suffix: suffix})
 		}
 	}
 
+	return c
+}
+
+func (c *CORS) originAllowed(origin string) bool {
+	if slices.Contains(c.options.AllowedOrigins, origin) {
+		return true
+	}
+
+	return slices.ContainsFunc(c.wildcards, func(w wildcardOrigin) bool {
+		return w.matches(origin)
+	})
+}
+
+func (c *CORS) setAllowOrigin(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" && c.originAllowed(origin) {
+		w.Header().Add("Access-Control-Allow-Origin", origin)
+		return
+	}
+
+	// Nothing matched, so fall back to the first configured origin.  A browser
+	// rejects the response unless that happens to be the caller's own origin,
+	// which is the intent; configure a concrete origin first so this carries a
+	// usable value rather than an unmatchable wildcard pattern.
 	w.Header().Add("Access-Control-Allow-Origin", c.options.AllowedOrigins[0])
 }
 
