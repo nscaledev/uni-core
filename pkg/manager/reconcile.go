@@ -505,6 +505,11 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 
 	object.SetProvisioningCondition(status, reason, message)
 
+	// Stamped here so it lands in the same status write as the condition.
+	if processor, ok := object.(unikornv1.GenerationProcessor); ok && err == nil && !deprovision {
+		processor.SetProcessedGeneration(object.GetGeneration())
+	}
+
 	if err := r.manager.GetClient().Status().Update(ctx, object); err != nil {
 		return err
 	}

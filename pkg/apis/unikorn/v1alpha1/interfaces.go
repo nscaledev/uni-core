@@ -52,6 +52,26 @@ type StatusConditionReader interface {
 	StatusConditionRead(t ConditionType) (*metav1.Condition, error)
 }
 
+// GenerationProcessor is implemented by resources that record the last spec
+// generation their controller finished with.  Opt in per type, asserted at
+// runtime, deliberately not part of ManagableResourceInterface.
+//
+// The manager stamps it on a successful provision only; any failure, yield or
+// recheck, and any deprovision, leaves it as it was.  It is a record for the
+// provisioner to read inside a reconcile, never an event filter: see the
+// manager README's processed generation guard rail.
+//
+// Zero means never processed.  A live resource starts at generation 1, so the
+// zero value correctly reads as outstanding work.
+type GenerationProcessor interface {
+	// ProcessedGeneration returns the last spec generation the controller
+	// finished with, or zero if it has never finished one.
+	ProcessedGeneration() int64
+
+	// SetProcessedGeneration records a generation as finished with.
+	SetProcessedGeneration(generation int64)
+}
+
 // ProvisioningConditionWriter sets the Available condition, with its reason
 // constrained to the provisioning vocabulary.  Every managed resource must
 // implement it; it is how the manager reports provisioning progress.
