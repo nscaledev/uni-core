@@ -45,6 +45,12 @@ func TestDispositions(t *testing.T) {
 	assert.ErrorIs(t, provisioners.Yield(r, "m"), provisioners.ErrYield)
 	assert.False(t, provisioners.IsTerminal(provisioners.Yield(r, "m")))
 
+	// A recheck is a yield to everything that only knows about yields.
+	assert.ErrorIs(t, provisioners.Recheck(r, "m"), provisioners.ErrRecheck)
+	assert.ErrorIs(t, provisioners.Recheck(r, "m"), provisioners.ErrYield)
+	assert.False(t, provisioners.IsTerminal(provisioners.Recheck(r, "m")))
+	assert.NotErrorIs(t, provisioners.Yield(r, "m"), provisioners.ErrRecheck)
+
 	assert.True(t, provisioners.IsTerminal(provisioners.Terminal(r, "m")))
 	assert.True(t, provisioners.IsTerminal(provisioners.UserActionRequired(r, "m")))
 	assert.True(t, provisioners.IsTerminal(fmt.Errorf("wrap: %w", provisioners.Terminal(r, "m"))))
@@ -104,12 +110,15 @@ func TestDependencyConstructors(t *testing.T) {
 
 	notReady := provisioners.DependencyNotReady(scheme, dep)
 	assert.ErrorIs(t, notReady, provisioners.ErrYield)
+	assert.NotErrorIs(t, notReady, provisioners.ErrRecheck)
 	assert.False(t, provisioners.IsTerminal(notReady))
 	assert.Equal(t, unikornv1.ConditionReasonDependencyNotReady, notReady.Reason())
 	assert.Equal(t, `ConfigMap "prod-net" (a1b2c3) is not ready`, notReady.Message())
 
+	// A failed dependency is not moving, so a polling controller waits for
+	// the next poll rather than retrying on the yield timeout.
 	failed := provisioners.DependencyFailed(scheme, dep)
-	assert.ErrorIs(t, failed, provisioners.ErrYield)
+	assert.ErrorIs(t, failed, provisioners.ErrRecheck)
 	assert.Equal(t, unikornv1.ConditionReasonDependencyFailed, failed.Reason())
 	assert.Equal(t, `ConfigMap "prod-net" (a1b2c3) has failed`, failed.Message())
 

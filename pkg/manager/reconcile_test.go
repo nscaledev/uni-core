@@ -679,67 +679,6 @@ func TestReconcileCreatePollingNegativePeriod(t *testing.T) {
 	reconcileSlotted(ctx, t, tc, reconciler, constants.DefaultRequeuePeriod)
 }
 
-// TestReconcileCreatePollingTerminal is the important one: polling must NOT
-// resurrect a parked resource.  A terminal disposition will not self-heal, so
-// requeuing it on a timer is precisely the workqueue burn ErrTerminal exists to
-// stop.  Revival stays out-of-band.
-func TestReconcileCreatePollingTerminal(t *testing.T) {
-	t.Parallel()
-
-	c := gomock.NewController(t)
-	defer c.Finish()
-
-	request := &unikornv1fake.ManagedResource{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      testName,
-		},
-	}
-
-	tc := mustNewTestContext(t, request)
-	ctx := t.Context()
-
-	p := mockprovisioners.NewMockManagerProvisioner(c)
-	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
-	p.EXPECT().Provision(gomock.Any()).Return(provisioners.Terminal(unikornv1.ConditionReasonDependencyNotFound, "gone"))
-
-	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
-
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Zero(t, result)
-}
-
-// TestReconcileCreatePollingUserActionRequired covers the other terminal
-// disposition, which is revived by a spec change rather than an operator, and
-// must equally not be requeued by polling.
-func TestReconcileCreatePollingUserActionRequired(t *testing.T) {
-	t.Parallel()
-
-	c := gomock.NewController(t)
-	defer c.Finish()
-
-	request := &unikornv1fake.ManagedResource{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: testNamespace,
-			Name:      testName,
-		},
-	}
-
-	tc := mustNewTestContext(t, request)
-	ctx := t.Context()
-
-	p := mockprovisioners.NewMockManagerProvisioner(c)
-	p.EXPECT().Object().Return(&unikornv1fake.ManagedResource{})
-	p.EXPECT().Provision(gomock.Any()).Return(provisioners.UserActionRequired(unikornv1.ConditionReasonErrored, "fix your spec"))
-
-	reconciler := manager.NewReconciler(managerOptionsWithRequeuePeriod(), nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, manager.WithPolling())
-
-	result, err := reconciler.Reconcile(ctx, newRequest(testNamespace, testName))
-	assert.NoError(t, err)
-	assert.Zero(t, result)
-}
-
 // TestReconcileCreatePollingYield tests that an in-progress reconcile keeps the
 // short yield timeout under polling.  The requeue period governs how often a
 // settled resource is re-observed, not how fast an unfinished one makes

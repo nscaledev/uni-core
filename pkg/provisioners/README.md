@@ -9,8 +9,8 @@ This package itself is intentionally small:
 - the `Provisioner` and `ManagerProvisioner` interfaces
 - the `RemoteCluster` interface for deriving remote kubeconfigs and identities
 - shared metadata for provisioner names
-- shared sentinel errors and error dispositions (`ErrYield`, `ErrTerminal`,
-  `ErrUserActionRequired`) plus the `Error` carrier type
+- shared sentinel errors and error dispositions (`ErrYield`, `ErrRecheck`,
+  `ErrTerminal`, `ErrUserActionRequired`) plus the `Error` carrier type
 
 Most of the real behavior lives in the lower-level adapters and combinators under this directory.
 
@@ -24,12 +24,15 @@ why dispositions are sentinels, never prose.
 | Disposition | Returned by | Manager behaviour | Recovery |
 | --- | --- | --- | --- |
 | `nil` | success | mark `Available: Provisioned`; a `WithPolling()` controller also requeues at its next slot in the requeue period, at `LowPriority` | n/a |
-| `ErrYield` | `ErrYield`, `Yield(reason, message)`, `DependencyNotReady`/`DependencyFailed` | write `Available: False`; requeue on the fixed yield timeout | next reconcile |
-| `ErrTerminal` | `Terminal(reason, message)`, `DependencyNotFound` | write `Available: False`; **stop requeuing** | operator intervention |
-| `ErrUserActionRequired` | `UserActionRequired(reason, message)` | write `Available: False`; **stop requeuing** | a spec change (generation bump) wakes the controller |
+| `ErrYield` | `ErrYield`, `Yield(reason, message)`, `DependencyNotReady` | write `Available: False`; requeue on the fixed yield timeout | work in flight finishes |
+| `ErrRecheck` (wraps `ErrYield`) | `Recheck(reason, message)`, `DependencyFailed` | write `Available: False`; a `WithPolling()` controller requeues at the next slot, at `LowPriority`; otherwise, and always on the delete path, it is the yield it wraps | the thing it waits on recovers on its own |
+| `ErrTerminal` | `Terminal(reason, message)`, `DependencyNotFound` | write `Available: False`; **stop requeuing**, except that a `WithPolling()` controller looks again at the next slot | operator intervention |
+| `ErrUserActionRequired` | `UserActionRequired(reason, message)` | write `Available: False`; **stop requeuing**, except that a `WithPolling()` controller looks again at the next slot | a spec change (generation bump) wakes the controller |
 
 `ErrTerminal` and `ErrUserActionRequired` are *terminal*: requeuing them just
-burns the workqueue on a failure that will not self-heal. Use
+burns the workqueue on a failure that will not self-heal. A polling controller
+is the exception, because nothing else would look again; see the manager
+README. Use
 `provisioners.IsTerminal(err)` to test for either. They differ only in how a
 resource is revived — that difference lives in the watch/predicate layer, not in
 the requeue decision.
@@ -64,8 +67,8 @@ back to the stringified error on the condition, a known fail-open leak.
 
 `Yield(reason, message)` is the `ErrYield` sibling of `Terminal` and
 `UserActionRequired`. Dependency waits are raised only through the enforced
-constructors — `DependencyNotReady` / `DependencyFailed` (both yield) and
-`DependencyNotFound` (terminal) — which take the dependency object, bind the
+constructors — `DependencyNotReady` (yield), `DependencyFailed` (recheck)
+and `DependencyNotFound` (terminal) — which take the dependency object, bind the
 reason and disposition together, and compose a safe message via the unexported
 `describeResource` (Kind from the scheme's GVK, the mutable display name, and the
 durable id). Binding them in one call is deliberate: a caller cannot pair a

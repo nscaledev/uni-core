@@ -44,7 +44,8 @@ var (
 	ErrNotFound = errors.New("resource not found")
 
 	// ErrTerminal marks a provisioning failure that will not self-heal and must
-	// stop being requeued.
+	// stop being requeued.  A WithPolling controller still looks again at the
+	// next poll, because nothing else would: there it sets only the condition.
 	//
 	// WHY: today a provisioner that returns any error other than ErrYield is
 	// requeued at a fixed interval forever (see reconcileNormal). There is no
@@ -75,8 +76,16 @@ var (
 	//
 	// NOTE: making this disposition actually recoverable requires the owning
 	// controller to clear any retry bookkeeping (e.g. attempt counters) on a
-	// generation change; the sentinel alone does not do that.
+	// generation change; the sentinel alone does not do that.  As with
+	// ErrTerminal, a WithPolling controller still looks again at the next poll.
 	ErrUserActionRequired = errors.New("provisioning requires user action")
+
+	// ErrRecheck marks a wait on something that is not moving but may recover
+	// on its own, such as a failed dependency: a WithPolling controller looks
+	// again at the next poll rather than on the yield timeout. It is a yield,
+	// so errors.Is(err, ErrYield) holds, and everywhere else it is requeued as
+	// one. See the README's disposition table.
+	ErrRecheck = fmt.Errorf("%w: recheck at the next poll", ErrYield)
 )
 
 // Error is a provisioning error that pairs a disposition with a user-safe,
@@ -88,8 +97,8 @@ var (
 // Error separates the pieces that serve the different audiences:
 //
 //   - disposition: the machine-switchable outcome (ErrTerminal,
-//     ErrUserActionRequired, ErrYield), exposed via Unwrap so errors.Is keeps
-//     working. Lives in the type system, never in prose.
+//     ErrUserActionRequired, ErrYield, ErrRecheck), exposed via Unwrap so
+//     errors.Is keeps working. Lives in the type system, never in prose.
 //   - reason: a closed-vocabulary ProvisioningConditionReason, machine-classifiable
 //     and written straight onto the Available condition's Reason field, e.g.
 //     DependencyFailed.
@@ -165,6 +174,12 @@ func Yield(reason unikornv1.ProvisioningConditionReason, message string) *Error 
 	return newError(ErrYield, reason, message)
 }
 
+// Recheck returns an ErrRecheck-dispositioned error: report this state, and wait
+// for the next poll rather than the yield timeout. See ErrRecheck.
+func Recheck(reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return newError(ErrRecheck, reason, message)
+}
+
 // describeResource renders a stable identifier for a resource for use in a
 // dependency Error's message: the Kind (from the scheme's GVK), the display name
 // (a point-in-time label value, mutable), and the durable id (the object name).
@@ -200,10 +215,11 @@ func DependencyNotReady(scheme *runtime.Scheme, o client.Object) *Error {
 }
 
 // DependencyFailed signals a wait on a dependency that is itself in an error
-// state. It still yields (the dependency may recover), but names the failure so
-// the wait is not mistaken for progress.
+// state. It is a recheck: the dependency may recover, but nothing is moving, so
+// a polling controller waits for the next poll. It names the failure so the
+// wait is not mistaken for progress.
 func DependencyFailed(scheme *runtime.Scheme, o client.Object) *Error {
-	return Yield(unikornv1.ConditionReasonDependencyFailed, describeResource(scheme, o)+" has failed")
+	return Recheck(unikornv1.ConditionReasonDependencyFailed, describeResource(scheme, o)+" has failed")
 }
 
 // DependencyNotFound signals a referenced dependency that does not exist. It is
@@ -214,7 +230,7 @@ func DependencyNotFound(scheme *runtime.Scheme, o client.Object) *Error {
 }
 
 // IsTerminal reports whether an error is a terminal provisioning disposition,
-// i.e. one that must NOT be requeued.
+// i.e. one that must NOT be requeued, except by a WithPolling controller's poll.
 //
 // WHY: the manager's requeue decision needs a single, authoritative test for
 // "stop retrying this" rather than open-coding the set of terminal sentinels at
