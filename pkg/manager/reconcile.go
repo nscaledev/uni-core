@@ -90,7 +90,8 @@ type ReconcilerOption func(*Reconciler)
 // constants.DefaultRequeuePeriod.
 //
 // A polling controller MUST NOT return Terminal() for external-system state
-// that can recover on its own: nothing wakes a parked resource, so use Yield().
+// that can recover on its own: nothing wakes a parked resource, so use
+// Recheck().
 // A paused resource is not polled, so unpausing MUST generate a watch event.
 // See the README's "Invariants And Guard Rails" section.
 func WithPolling() ReconcilerOption {
@@ -315,6 +316,16 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 			return reconcile.Result{}, nil
 		}
 
+		// A recheck is polled like a success, not retried like a yield: the
+		// external system has to move, and nothing this controller does will
+		// make it move sooner.  Without polling it falls through as the yield
+		// it wraps.
+		if errors.Is(perr, provisioners.ErrRecheck) && r.requeuePeriod > 0 {
+			log.Info("rechecking at the next poll", "message", perr)
+
+			return r.poll(object), nil
+		}
+
 		if !errors.Is(perr, provisioners.ErrYield) {
 			log.Error(perr, "provisioning failed unexpectedly")
 		}
@@ -330,9 +341,14 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 		return reconcile.Result{}, nil
 	}
 
-	// A requeue keeps the priority of the pass it came from, so set it or a
-	// poll could compete with new work.  See the README.
-	return reconcile.Result{RequeueAfter: nextSlot(object.GetUID(), r.requeuePeriod, time.Now()), Priority: ptr.To(handler.LowPriority)}, nil
+	return r.poll(object), nil
+}
+
+// poll requeues the resource at its next slot.  A requeue keeps the priority of
+// the pass it came from, so set it or a poll could compete with new work.  See
+// the README.
+func (r *Reconciler) poll(object unikornv1.ManagableResourceInterface) reconcile.Result {
+	return reconcile.Result{RequeueAfter: nextSlot(object.GetUID(), r.requeuePeriod, time.Now()), Priority: ptr.To(handler.LowPriority)}
 }
 
 // minimumGapFraction sets the shortest wait nextSlot returns, as a fraction of
@@ -404,6 +420,18 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// changes, never on every poll. Nil when there is no condition yet.
 	prior, _ := unikornv1.GetAvailableCondition(object)
 
+	var perr *provisioners.Error
+
+	typed := errors.As(err, &perr)
+
+	// A bare recheck observed nothing new, so it leaves the condition as it is.
+	// Unlike context.Canceled it still persists the rest of status, which the
+	// pass may have written.  Not while deleting: a stale Provisioned would tell
+	// dependents a dying resource is ready, so there it is the yield it wraps.
+	if errors.Is(err, provisioners.ErrRecheck) && !typed && !deprovision {
+		return r.manager.GetClient().Status().Update(ctx, object)
+	}
+
 	// Phase 1: derive status and a lifecycle-default reason/message from the
 	// disposition. context.Canceled is the one outcome we deliberately do not
 	// record, leaving the existing condition untouched.
@@ -464,8 +492,7 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// API projection keys off the deletion timestamp (not the reason), and the
 	// requeue decision keys off the disposition, so only the raw condition Reason
 	// would show the blocker — arguably the more useful thing to surface.
-	var perr *provisioners.Error
-	if errors.As(err, &perr) {
+	if typed {
 		reason = perr.Reason()
 		message = perr.Message()
 	}
@@ -477,6 +504,11 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		prior.Message != message
 
 	object.SetProvisioningCondition(status, reason, message)
+
+	// Stamped here so it lands in the same status write as the condition.
+	if processor, ok := object.(unikornv1.GenerationProcessor); ok && err == nil && !deprovision {
+		processor.SetProcessedGeneration(object.GetGeneration())
+	}
 
 	if err := r.manager.GetClient().Status().Update(ctx, object); err != nil {
 		return err

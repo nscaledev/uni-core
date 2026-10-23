@@ -9,8 +9,8 @@ This package itself is intentionally small:
 - the `Provisioner` and `ManagerProvisioner` interfaces
 - the `RemoteCluster` interface for deriving remote kubeconfigs and identities
 - shared metadata for provisioner names
-- shared sentinel errors and error dispositions (`ErrYield`, `ErrTerminal`,
-  `ErrUserActionRequired`) plus the `Error` carrier type
+- shared sentinel errors and error dispositions (`ErrYield`, `ErrRecheck`,
+  `ErrTerminal`, `ErrUserActionRequired`) plus the `Error` carrier type
 
 Most of the real behavior lives in the lower-level adapters and combinators under this directory.
 
@@ -25,6 +25,7 @@ why dispositions are sentinels, never prose.
 | --- | --- | --- | --- |
 | `nil` | success | mark `Available: Provisioned`; a `WithPolling()` controller also requeues at its next slot in the requeue period, at `LowPriority` | n/a |
 | `ErrYield` | `ErrYield`, `Yield(reason, message)`, `DependencyNotReady`/`DependencyFailed` | write `Available: False`; requeue on the fixed yield timeout | next reconcile |
+| `ErrRecheck` (wraps `ErrYield`) | `Recheck(reason, message)`, bare `ErrRecheck` | Condition: typed writes `Available: False`; bare leaves `Available` as it was and saves the rest of status, except on the delete path, where it writes `Deprovisioning` as a yield does. Requeue: a `WithPolling()` controller requeues at the next slot, at `LowPriority`; otherwise, and always on the delete path, on the yield timeout | the external system moves on its own; the next poll sees it |
 | `ErrTerminal` | `Terminal(reason, message)`, `DependencyNotFound` | write `Available: False`; **stop requeuing** | operator intervention |
 | `ErrUserActionRequired` | `UserActionRequired(reason, message)` | write `Available: False`; **stop requeuing** | a spec change (generation bump) wakes the controller |
 

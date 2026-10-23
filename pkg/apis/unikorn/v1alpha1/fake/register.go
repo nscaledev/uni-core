@@ -50,6 +50,7 @@ var (
 //nolint:gochecknoinits
 func init() {
 	SchemeBuilder.Register(&ManagedResource{}, &ManagedResourceList{})
+	SchemeBuilder.Register(&GenerationalResource{}, &GenerationalResourceList{})
 }
 
 // Resource maps a resource type to a group resource.

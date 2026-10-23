@@ -103,7 +103,7 @@ func mustNewTestContextWithInterceptor(t *testing.T, funcs interceptor.Funcs, ob
 	}
 
 	tc := &testContext{
-		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}).WithObjects(objects...).WithInterceptorFuncs(funcs).Build(),
+		client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&unikornv1fake.ManagedResource{}, &unikornv1fake.GenerationalResource{}).WithObjects(objects...).WithInterceptorFuncs(funcs).Build(),
 		scheme: scheme,
 	}
 

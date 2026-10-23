@@ -77,6 +77,15 @@ var (
 	// controller to clear any retry bookkeeping (e.g. attempt counters) on a
 	// generation change; the sentinel alone does not do that.
 	ErrUserActionRequired = errors.New("provisioning requires user action")
+
+	// ErrRecheck marks state that a polling controller cannot fix and must not
+	// park on, because the external system may move it back on its own: look
+	// again at the next poll. Typed (Recheck), it reports its reason on the
+	// Available condition; bare, it leaves the condition as it is, for a pass
+	// that could not observe anything new, except while deleting. It is a
+	// yield, so errors.Is(err, ErrYield) holds, and without WithPolling it is
+	// requeued as one. See the README's disposition table.
+	ErrRecheck = fmt.Errorf("%w: recheck at the next poll", ErrYield)
 )
 
 // Error is a provisioning error that pairs a disposition with a user-safe,
@@ -88,7 +97,7 @@ var (
 // Error separates the pieces that serve the different audiences:
 //
 //   - disposition: the machine-switchable outcome (ErrTerminal,
-//     ErrUserActionRequired, ErrYield), exposed via Unwrap so errors.Is keeps
+//     ErrUserActionRequired, ErrYield, ErrRecheck), exposed via Unwrap so errors.Is keeps
 //     working. Lives in the type system, never in prose.
 //   - reason: a closed-vocabulary ProvisioningConditionReason, machine-classifiable
 //     and written straight onto the Available condition's Reason field, e.g.
@@ -163,6 +172,12 @@ func UserActionRequired(reason unikornv1.ProvisioningConditionReason, message st
 // and UserActionRequired.
 func Yield(reason unikornv1.ProvisioningConditionReason, message string) *Error {
 	return newError(ErrYield, reason, message)
+}
+
+// Recheck returns an ErrRecheck-dispositioned error: report this state, and look
+// again at the next poll rather than parking. See ErrRecheck.
+func Recheck(reason unikornv1.ProvisioningConditionReason, message string) *Error {
+	return newError(ErrRecheck, reason, message)
 }
 
 // describeResource renders a stable identifier for a resource for use in a
