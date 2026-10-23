@@ -167,8 +167,43 @@ func doInitialize(f ControllerFactory, mgr manager.Manager, options *options.Opt
 	return nil
 }
 
-// Run provides common manager initialization and execution.
+// telemetrySetup sets up tracing and metrics for a controller process.
+type telemetrySetup func(ctx context.Context, options *options.Options) error
+
+// pushTelemetry pushes metrics over OTLP.
+func pushTelemetry(ctx context.Context, options *options.Options) error {
+	//nolint:staticcheck // until every controller uses RunService
+	return options.SetupOpenTelemetry(ctx)
+}
+
+// scrapeTelemetry labels traces and scraped metrics with service, and leaves
+// metrics to be scraped from the manager's metrics endpoint.
+func scrapeTelemetry(service string) telemetrySetup {
+	return func(ctx context.Context, options *options.Options) error {
+		if err := options.SetupTracing(ctx, service); err != nil {
+			return err
+		}
+
+		return options.SetupMetrics(service)
+	}
+}
+
+// Run provides common manager initialization and execution, pushing metrics
+// over OTLP.
+//
+// Deprecated: Use RunService, so metrics are scraped rather than pushed.
 func Run(f ControllerFactory) {
+	run(f, pushTelemetry)
+}
+
+// RunService provides common manager initialization and execution. Traces and
+// scraped metrics are labelled with service, and metrics are scraped from the
+// manager's metrics endpoint rather than pushed.
+func RunService(service string, f ControllerFactory) {
+	run(f, scrapeTelemetry(service))
+}
+
+func run(f ControllerFactory, setupTelemetry telemetrySetup) {
 	o := &options.Options{}
 	o.AddFlags(pflag.CommandLine)
 
@@ -188,7 +223,7 @@ func Run(f ControllerFactory) {
 
 	ctx := signals.SetupSignalHandler()
 
-	if err := o.SetupOpenTelemetry(ctx); err != nil {
+	if err := setupTelemetry(ctx, o); err != nil {
 		logger.Error(err, "open telemetry setup failed")
 		os.Exit(1)
 	}

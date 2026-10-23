@@ -17,8 +17,11 @@ It currently provides two shared option groups:
 - `ServerOptions` is the canonical shared flag surface for standard API server listener and timeout behavior.
 - `AddFlags()` methods here define shared CLI contract. Changes to flag names, meanings, or defaults have operational impact beyond this package.
 - `SetupLogging()` is the common path for wiring zap, controller-runtime logging, `klog`, and OpenTelemetry logging consistently in the same process.
-- `SetupOpenTelemetry()` is the common path for process-wide observability bootstrap. It sets global trace propagation plus tracer and meter providers for the process.
-- When an OTLP endpoint is configured, `SetupOpenTelemetry()` also bridges controller-runtime Prometheus metrics into OTLP export rather than only enabling trace export.
+- `SetupTracing(service)` sets global trace propagation and the tracer provider, exporting traces when an OTLP endpoint is configured. The trace resource's `service.name` is `service`, overriding `OTEL_SERVICE_NAME`.
+- `SetupMetrics(service)` sets the global meter provider so OpenTelemetry instruments are exported on the controller-runtime registry and scraped with the controller-runtime metrics. Nothing is pushed. It replaces `ctrlmetrics.Registry` with a wrapper that adds `service="<service>"` (`ServiceLabel`) to every gathered series without one, so call it before the registry is served. Dashboards and alerts select a service by that label; it is the same for every binary in a service. [docs/metrics.md](../../docs/metrics.md) has the label contract and the steps for porting a service.
+- Controller-runtime managers serve that registry at `:8080/metrics`. Processes without a manager call `ServeMetrics()` to serve it the same way, on an address of their choice.
+- `SetupOpenTelemetry()` is deprecated. It calls `SetupTracing()`, then sets a meter provider that, when an OTLP endpoint is configured, pushes OpenTelemetry instruments and a copy of the controller-runtime metrics over OTLP. Pushed copies lack `namespace`, `pod` and `service` labels and duplicate the scraped series.
+- A process installs one meter provider. Once `SetupMetrics()` or `SetupOpenTelemetry()` has done so, any further call to either fails, so neither replaces a meter provider whose instruments are already in use.
 - Helm chart helpers and values that surface these options are expected to stay aligned with the structs and flags defined here.
 
 ## Caveats
