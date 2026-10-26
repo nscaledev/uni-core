@@ -48,6 +48,18 @@ func FromContext(ctx context.Context) (*RouteInfo, error) {
 	return v, nil
 }
 
+type resolvedHookKeyType int
+
+const resolvedHookKey resolvedHookKeyType = iota
+
+// WithResolvedHook returns a context in which Middleware calls hook with the
+// route it resolves, before calling the next handler. Middleware placed before
+// route resolution uses it to learn the route, and to tell when a request
+// failed to resolve, because the resolver answers those requests itself.
+func WithResolvedHook(ctx context.Context, hook func(*RouteInfo)) context.Context {
+	return context.WithValue(ctx, resolvedHookKey, hook)
+}
+
 // RouteResolver performs the relatively costly translation from request URL to an
 // OpenAPI route once and stashes it in the context for easy use by other middlewares.
 type RouteResolver struct {
@@ -84,10 +96,16 @@ func (m *RouteResolver) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), RouteInfoKey, &RouteInfo{
+		info := &RouteInfo{
 			Route:      route,
 			Parameters: parameters,
-		})
+		}
+
+		if hook, ok := r.Context().Value(resolvedHookKey).(func(*RouteInfo)); ok {
+			hook(info)
+		}
+
+		ctx := context.WithValue(r.Context(), RouteInfoKey, info)
 
 		request := r.Clone(ctx)
 
