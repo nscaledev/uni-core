@@ -272,6 +272,9 @@ func (r *serviceRegistry) Gather() ([]*dto.MetricFamily, error) {
 // bindAddress, as a controller-runtime manager does, for processes that don't
 // run a manager. An empty address means :8080, and "0" disables the server.
 // It blocks until the context is done.
+//
+// Deprecated: Use RunWithMetrics, which stops the process's work when metrics
+// cannot be served.
 func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) error {
 	server, err := metricsserver.NewServer(metricsserver.Options{BindAddress: bindAddress}, nil, nil)
 	if err != nil {
