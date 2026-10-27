@@ -322,8 +322,8 @@ const (
 	// projects to the coarse provisioning (in-flight) status.
 	ConditionReasonDependencyNotReady ProvisioningConditionReason = "DependencyNotReady"
 	// ConditionReasonDependencyFailed means a dependency the resource is waiting
-	// on is itself in an error state. Still a yield from our side (it may
-	// recover), so it too projects to the coarse provisioning status.
+	// on is itself in an error state. A recheck from our side (it may recover,
+	// but is not moving), so it too projects to the coarse provisioning status.
 	ConditionReasonDependencyFailed ProvisioningConditionReason = "DependencyFailed"
 	// ConditionReasonDependencyNotFound means a referenced dependency does not
 	// exist. Terminal: no amount of waiting can resolve it, so it projects to the
