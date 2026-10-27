@@ -284,6 +284,50 @@ func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) erro
 	return server.Start(ctx)
 }
 
+// RunWithMetrics serves metrics on bindAddress, as ServeMetrics does, while run
+// does the process's work. When either stops, the other is stopped through its
+// context, so a process whose metrics cannot be served stops, as a manager does
+// when its metrics server fails, and the metrics server never outlives the
+// work. It returns the metrics error if that stopped run, and otherwise run's
+// result. Disabled metrics ("0") do not stop run.
+func (o *CoreOptions) RunWithMetrics(ctx context.Context, bindAddress string, run func(context.Context) error) error {
+	return runWithMetrics(ctx, func(ctx context.Context) error { return o.ServeMetrics(ctx, bindAddress) }, run)
+}
+
+func runWithMetrics(ctx context.Context, serveMetrics, run func(context.Context) error) error {
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+
+	metricsDone := make(chan struct{})
+
+	go func() {
+		defer close(metricsDone)
+
+		if err := serveMetrics(ctx); err != nil {
+			stop(metricsError{err})
+		}
+	}()
+
+	runErr := run(ctx)
+
+	// Only the first cause is kept, so once run has returned, a metrics error
+	// from being stopped cannot replace its result.
+	stop(nil)
+	<-metricsDone
+
+	var failed metricsError
+	if errors.As(context.Cause(ctx), &failed) {
+		return failed.err
+	}
+
+	return runErr
+}
+
+// metricsError is the cause when the metrics server stops RunWithMetrics' work.
+type metricsError struct{ err error }
+
+func (e metricsError) Error() string { return e.err.Error() }
+
 // ServerOptions are shared across all servers.
 type ServerOptions struct {
 	// ListenAddress tells the server what to listen on, you shouldn't
