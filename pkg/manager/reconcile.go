@@ -77,6 +77,10 @@ type Reconciler struct {
 	// WithPolling sets it once at construction, so the fallback is logged once,
 	// and it is then always positive.
 	requeuePeriod time.Duration
+
+	// transient reports whether a provision failed because a service could not
+	// be reached.  Nil unless WithTransient is set.
+	transient func(error) bool
 }
 
 // ReconcilerOption allows optional reconciler behaviour to be enabled without
@@ -302,7 +306,7 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	case perr == nil:
 		log.Info("reconcile complete")
 	case errors.Is(perr, provisioners.ErrYield) && !errors.Is(perr, provisioners.ErrRecheck):
-	case handled(perr):
+	case handled(perr), r.unreachable(perr):
 		log.Info("provisioning failed", "error", perr)
 	default:
 		log.Error(perr, "provisioning failed unexpectedly")
@@ -420,6 +424,13 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	var perr *provisioners.Error
 
 	typed := errors.As(err, &perr)
+
+	// Could not look is not news about the resource, so leave the condition as
+	// it is, but save what the pass did see.  Not while deleting: a stale
+	// Provisioned would tell dependents a dying resource is ready.
+	if !deprovision && r.unreachable(err) {
+		return r.manager.GetClient().Status().Update(ctx, object)
+	}
 
 	// Phase 1: derive status and a lifecycle-default reason/message from the
 	// disposition. context.Canceled is the one outcome we deliberately do not
