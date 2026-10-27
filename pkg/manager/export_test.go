@@ -19,10 +19,20 @@ package manager
 import (
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
 	"k8s.io/apimachinery/pkg/types"
 )
 
 // NextSlot exposes nextSlot to the external test package.
 func NextSlot(uid types.UID, d time.Duration, now time.Time) time.Duration {
 	return nextSlot(uid, d, now)
+}
+
+// WithMeterProvider counts reconcile outcomes with provider rather than the
+// global one, so a test can read them.
+func WithMeterProvider(provider metric.MeterProvider) ReconcilerOption {
+	return func(r *Reconciler) {
+		r.outcomes = newOutcomes(provider)
+	}
 }
