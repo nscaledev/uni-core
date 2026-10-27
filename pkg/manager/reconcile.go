@@ -25,6 +25,9 @@ import (
 	"math"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
 	"github.com/unikorn-cloud/core/pkg/cd/argocd"
@@ -81,6 +84,9 @@ type Reconciler struct {
 	// transient reports whether a provision failed because a service could not
 	// be reached.  Nil unless WithTransient is set.
 	transient func(error) bool
+
+	// outcomes counts passes by what they returned.
+	outcomes metric.Int64Counter
 }
 
 // ReconcilerOption allows optional reconciler behaviour to be enabled without
@@ -122,6 +128,10 @@ func NewReconciler(options *options.Options, controllerOptions ControllerOptions
 
 	for _, o := range reconcilerOptions {
 		o(r)
+	}
+
+	if r.outcomes == nil {
+		r.outcomes = newOutcomes(otel.GetMeterProvider())
 	}
 
 	return r
@@ -429,6 +439,8 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// it is, but save what the pass did see.  Not while deleting: a stale
 	// Provisioned would tell dependents a dying resource is ready.
 	if !deprovision && r.unreachable(err) {
+		r.countOutcome(ctx, err, true, deprovision, "")
+
 		return r.manager.GetClient().Status().Update(ctx, object)
 	}
 
@@ -455,7 +467,7 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 			message = "deprovisioning"
 		}
 	case errors.Is(err, context.Canceled):
-		// Leave it as it is.
+		// Leave it as it is.  Not counted: the process is stopping.
 		return nil
 	default:
 		// Everything else, including the terminal dispositions
@@ -496,6 +508,8 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 		reason = perr.Reason()
 		message = perr.Message()
 	}
+
+	r.countOutcome(ctx, err, false, deprovision, reason)
 
 	// Edge: did this transition actually change the surfaced provisioning state?
 	changed := prior == nil ||

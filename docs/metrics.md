@@ -31,6 +31,19 @@ metrics, with the same names and labels in every service:
 matches no route. `method` is a standard HTTP method or `_OTHER`.
 `status_class` is `2xx`, `4xx`, `5xx` and so on.
 
+Controllers using core's reconciler count every pass by what it
+returned, with the same name and labels in every service:
+
+- `reconcile_outcomes_total{operation,outcome,reason}`, a counter.
+
+`operation` is `provision` or `deprovision`. `outcome` is `success`,
+`yield`, `recheck`, `transient`, `terminal`, `user_action_required` or
+`error` (an untyped failure). `reason` is the `Available` condition
+reason the pass wrote, or empty for `transient`, which leaves the
+condition alone. It is a count of passes, not of resources: a failing
+resource under polling adds one per period. See
+`pkg/manager/README.md`.
+
 Not part of the contract, so don't select on them:
 
 - `job` and `instance`. The scraper sets them, and they differ between
