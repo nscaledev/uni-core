@@ -599,6 +599,85 @@ func TestRunWithMetricsDisabledRunsAlone(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Cancelling stops the server gracefully: it stops accepting connections, a
+// request in flight still completes, and the server closing is not an error.
+func TestServeHTTPShutsDownGracefully(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "localhost:0")
+	require.NoError(t, err)
+
+	addr := listener.Addr().String()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	server := &http.Server{
+		ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			close(entered)
+			<-release
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+
+	errs := make(chan error, 1)
+
+	go func() {
+		errs <- ServeHTTP(ctx, server, func() error { return server.Serve(listener) }, 5*time.Second)
+	}()
+
+	responses := make(chan int, 1)
+
+	go func() {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/", nil)
+		if err != nil {
+			responses <- 0
+			return
+		}
+
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			responses <- 0
+			return
+		}
+
+		defer response.Body.Close()
+
+		responses <- response.StatusCode
+	}()
+
+	<-entered
+	cancel()
+
+	// Shutdown closes the listener first; once it has, release the request.
+	require.Eventually(t, func() bool {
+		conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+		if err != nil {
+			return true
+		}
+
+		_ = conn.Close()
+
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+
+	close(release)
+
+	assert.Equal(t, http.StatusOK, <-responses)
+	require.NoError(t, returned(t, errs))
+}
+
+func TestServeHTTPReturnsServeError(t *testing.T) {
+	t.Parallel()
+
+	err := ServeHTTP(t.Context(), &http.Server{ReadHeaderTimeout: time.Second}, func() error { return errTestRun }, time.Second)
+	require.ErrorIs(t, err, errTestRun)
+}
+
 func TestSetupMetricsRequiresService(t *testing.T) {
 	t.Parallel()
 
