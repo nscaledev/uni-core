@@ -56,6 +56,8 @@ type passTest struct {
 	prior *metav1.Condition
 	// funcs lets a test make client calls fail.
 	funcs interceptor.Funcs
+	// options are added to the reconciler's options.
+	options []manager.ReconcilerOption
 }
 
 func provisioned() *metav1.Condition {
@@ -129,6 +131,8 @@ func newPassTest(t *testing.T, c *gomock.Controller, test passTest) (*testContex
 
 		reconcilerOptions = append(reconcilerOptions, manager.WithPolling())
 	}
+
+	reconcilerOptions = append(reconcilerOptions, test.options...)
 
 	reconciler := manager.NewReconciler(opts, nil, tc.newManager(c), func(_ manager.ControllerOptions) provisioners.ManagerProvisioner { return p }, reconcilerOptions...)
 
