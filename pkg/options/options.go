@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -327,6 +328,39 @@ func runWithMetrics(ctx context.Context, serveMetrics, run func(context.Context)
 type metricsError struct{ err error }
 
 func (e metricsError) Error() string { return e.err.Error() }
+
+// ServeHTTP runs serve, e.g. server.ListenAndServe, until ctx is done, then shuts
+// server down gracefully, waiting up to shutdownTimeout for requests in flight.
+// A server closed by that shutdown is not an error. Call it from the work
+// passed to RunWithMetrics to run an API server alongside its metrics.
+func ServeHTTP(ctx context.Context, server *http.Server, serve func() error, shutdownTimeout time.Duration) error {
+	errs := make(chan error, 1)
+
+	go func() { errs <- serve() }()
+
+	select {
+	case err := <-errs:
+		return ignoreServerClosed(err)
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+
+	return ignoreServerClosed(<-errs)
+}
+
+func ignoreServerClosed(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return err
+}
 
 // ServerOptions are shared across all servers.
 type ServerOptions struct {
