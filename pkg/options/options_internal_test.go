@@ -18,6 +18,7 @@ package options
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -345,6 +346,61 @@ func freePort(t *testing.T) string {
 	return addr
 }
 
+// getMetrics reads addr's metrics endpoint.
+func getMetrics(ctx context.Context, addr string) (int, string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/metrics", nil)
+	if err != nil {
+		return 0, "", err
+	}
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return 0, "", err
+	}
+
+	defer response.Body.Close()
+
+	data, err := io.ReadAll(response.Body)
+
+	return response.StatusCode, string(data), err
+}
+
+// serveOnFreePort runs serve in the background on a free port until it serves
+// metrics, and returns the port and serve's result. A released port can be
+// taken again, e.g. as the local end of another test's connection, before
+// serve binds it, so a serve that ends before serving is retried on another.
+func serveOnFreePort(t *testing.T, serve func(addr string) error) (string, <-chan error) {
+	t.Helper()
+
+	var lastErr error
+
+	for range 10 {
+		lastErr = nil
+		addr := freePort(t)
+		errs := make(chan error, 1)
+
+		go func() { errs <- serve(addr) }()
+
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if len(errs) > 0 {
+				lastErr = <-errs
+
+				break
+			}
+
+			if status, _, err := getMetrics(t.Context(), addr); err == nil && status == http.StatusOK {
+				return addr, errs
+			}
+		}
+
+		require.Error(t, lastErr, "%s not served", addr)
+	}
+
+	require.FailNow(t, "no free port served", "last error: %v", lastErr)
+
+	return "", nil
+}
+
 // scrape serves the controller-runtime registry with ServeMetrics and returns
 // what a scrape of it reads.
 func scrape(t *testing.T) string {
@@ -353,31 +409,13 @@ func scrape(t *testing.T) string {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	addr := freePort(t)
-
 	o := &CoreOptions{}
 
-	errs := make(chan error, 1)
+	addr, errs := serveOnFreePort(t, func(addr string) error { return o.ServeMetrics(ctx, addr) })
 
-	go func() { errs <- o.ServeMetrics(ctx, addr) }()
-
-	var body string
-
-	require.EventuallyWithT(t, func(c *assert.CollectT) {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+"/metrics", nil)
-		require.NoError(c, err)
-
-		response, err := http.DefaultClient.Do(request)
-		require.NoError(c, err)
-
-		defer response.Body.Close()
-
-		data, err := io.ReadAll(response.Body)
-		require.NoError(c, err)
-		require.Equal(c, http.StatusOK, response.StatusCode)
-
-		body = string(data)
-	}, 5*time.Second, 50*time.Millisecond)
+	status, body, err := getMetrics(ctx, addr)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
 
 	cancel()
 	require.NoError(t, <-errs)
@@ -404,6 +442,240 @@ func TestServeMetricsDisabled(t *testing.T) {
 
 	o := &CoreOptions{}
 	require.NoError(t, o.ServeMetrics(t.Context(), "0"))
+}
+
+var (
+	errTestRun            = errors.New("test run failed")
+	errTestMetricsStopped = errors.New("test metrics stopped")
+)
+
+// returned waits for the result of a call running in the background, failing
+// if it does not return, i.e. something was not stopped.
+func returned(t *testing.T, errs <-chan error) error {
+	t.Helper()
+
+	select {
+	case err := <-errs:
+		return err
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "did not return")
+
+		return nil
+	}
+}
+
+// A process whose metrics cannot be served stops: run's context is cancelled
+// and the metrics error is returned.
+func TestRunWithMetricsStopsRunWhenMetricsCannotBeServed(t *testing.T) {
+	t.Parallel()
+
+	taken, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "localhost:0")
+	require.NoError(t, err)
+
+	defer taken.Close()
+
+	o := &CoreOptions{}
+
+	errs := make(chan error, 1)
+
+	go func() {
+		errs <- o.RunWithMetrics(t.Context(), taken.Addr().String(), func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return nil
+		})
+	}()
+
+	require.ErrorContains(t, returned(t, errs), "address already in use")
+}
+
+// When the work ends, with or without an error, the metrics server stops too,
+// so the process can exit.
+func TestRunWithMetricsStopsMetricsWhenRunReturns(t *testing.T) {
+	t.Parallel()
+
+	for _, runErr := range []error{errTestRun, nil} {
+		o := &CoreOptions{}
+
+		release := make(chan struct{})
+
+		_, errs := serveOnFreePort(t, func(addr string) error {
+			return o.RunWithMetrics(t.Context(), addr, func(ctx context.Context) error {
+				select {
+				case <-release:
+					return runErr
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			})
+		})
+
+		close(release)
+
+		require.ErrorIs(t, returned(t, errs), runErr)
+	}
+}
+
+// Work that ends first returns its own result, not the error the metrics
+// server reports on being stopped, and only once the metrics server has
+// returned. The fake metrics server can only see its context done once the
+// work has returned, so it reports afterwards.
+func TestRunWithMetricsReturnsRunResultWhenRunEndsFirst(t *testing.T) {
+	t.Parallel()
+
+	for _, runErr := range []error{errTestRun, nil} {
+		runReturned := make(chan struct{})
+		metricsReturned := make(chan struct{})
+
+		serveMetrics := func(ctx context.Context) error {
+			defer close(metricsReturned)
+
+			<-ctx.Done()
+
+			select {
+			case <-runReturned:
+			default:
+				t.Error("metrics stopped before run returned")
+			}
+
+			return errTestMetricsStopped
+		}
+
+		err := runWithMetrics(t.Context(), serveMetrics, func(context.Context) error {
+			defer close(runReturned)
+
+			return runErr
+		})
+		if runErr == nil {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, runErr)
+		}
+
+		select {
+		case <-metricsReturned:
+		default:
+			require.FailNow(t, "metrics server outlived the work")
+		}
+	}
+}
+
+// Cancelling the parent context, as SIGTERM would, stops both.
+func TestRunWithMetricsStopsOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	o := &CoreOptions{}
+
+	_, errs := serveOnFreePort(t, func(addr string) error {
+		return o.RunWithMetrics(ctx, addr, func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return nil
+		})
+	})
+
+	cancel()
+
+	require.NoError(t, returned(t, errs))
+}
+
+// Disabled metrics are not a failure: the work carries on alone.
+func TestRunWithMetricsDisabledRunsAlone(t *testing.T) {
+	t.Parallel()
+
+	o := &CoreOptions{}
+
+	err := o.RunWithMetrics(t.Context(), "0", func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return errTestRun
+		case <-time.After(200 * time.Millisecond):
+			return nil
+		}
+	})
+	require.NoError(t, err)
+}
+
+// Cancelling stops the server gracefully: it stops accepting connections, a
+// request in flight still completes, and the server closing is not an error.
+func TestServeHTTPShutsDownGracefully(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "localhost:0")
+	require.NoError(t, err)
+
+	addr := listener.Addr().String()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	server := &http.Server{
+		ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			close(entered)
+			<-release
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
+
+	errs := make(chan error, 1)
+
+	go func() {
+		errs <- ServeHTTP(ctx, server, func() error { return server.Serve(listener) }, 5*time.Second)
+	}()
+
+	responses := make(chan int, 1)
+
+	go func() {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/", nil)
+		if err != nil {
+			responses <- 0
+			return
+		}
+
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			responses <- 0
+			return
+		}
+
+		defer response.Body.Close()
+
+		responses <- response.StatusCode
+	}()
+
+	<-entered
+	cancel()
+
+	// Shutdown closes the listener first; once it has, release the request.
+	require.Eventually(t, func() bool {
+		conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+		if err != nil {
+			return true
+		}
+
+		_ = conn.Close()
+
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+
+	close(release)
+
+	assert.Equal(t, http.StatusOK, <-responses)
+	require.NoError(t, returned(t, errs))
+}
+
+func TestServeHTTPReturnsServeError(t *testing.T) {
+	t.Parallel()
+
+	err := ServeHTTP(t.Context(), &http.Server{ReadHeaderTimeout: time.Second}, func() error { return errTestRun }, time.Second)
+	require.ErrorIs(t, err, errTestRun)
 }
 
 func TestSetupMetricsRequiresService(t *testing.T) {

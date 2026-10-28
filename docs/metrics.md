@@ -66,8 +66,12 @@ Points to be aware of:
 4. Other processes (API servers, monitors, consumers): replace
    `SetupOpenTelemetry(ctx)` with `SetupTracing(ctx, constants.Service)`
    and `SetupMetrics(constants.Service)`, called before any instrument is
-   created. Then run `ServeMetrics(ctx, addr)`, on an address that
-   doesn't clash with the API listener. API servers also add core's
+   created. Then run the process's work under
+   `RunWithMetrics(ctx, addr, run)`, on an address that doesn't clash
+   with the API listener, so the process stops if its metrics cannot be
+   served; API servers wrap `ServeHTTP` as the work (see
+   [the example](../pkg/options/README.md#serving-an-api-with-its-metrics)).
+   API servers also add core's
    `metrics` middleware immediately before `routeresolver` (see
    `pkg/server/middleware/README.md`).
 5. In the chart, every pod that serves metrics:
