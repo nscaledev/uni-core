@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/unikorn-cloud/core/pkg/manager/health"
 	"github.com/unikorn-cloud/core/pkg/messaging"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -62,17 +63,17 @@ func NewForManager(object client.Object) *MessageQueue {
 
 var _ = messaging.Queue(&MessageQueue{})
 
+// Run starts a controller-runtime manager for the queue and blocks. The
+// manager serves metrics on :8080 and health probes on health.Address, so a
+// process that uses Run must not serve its own metrics on :8080.
 func (q *MessageQueue) Run(ctx context.Context, consumers ...messaging.Consumer) error {
-	options := cr.Options{
-		// Explicitly adds custom resource support.
-		Scheme: q.scheme,
-		// Kubernetes doesn't do partitions so we limit to a single consumer.
-		LeaderElection:   true,
-		LeaderElectionID: filepath.Base(os.Args[0]),
+	// Kubernetes doesn't do partitions so we limit to a single consumer.
+	manager, err := cr.NewManager(q.config, health.Options(q.scheme, filepath.Base(os.Args[0])))
+	if err != nil {
+		return err
 	}
 
-	manager, err := cr.NewManager(q.config, options)
-	if err != nil {
+	if err := health.AddChecks(manager); err != nil {
 		return err
 	}
 

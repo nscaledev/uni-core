@@ -67,7 +67,10 @@ Points to be aware of:
    `SetupOpenTelemetry(ctx)` with `SetupTracing(ctx, constants.Service)`
    and `SetupMetrics(constants.Service)`, called before any instrument is
    created. Then run `ServeMetrics(ctx, addr)`, on an address that
-   doesn't clash with the API listener. API servers also add core's
+   doesn't clash with the API listener. A consumer that calls
+   `messaging/kubernetes`' `Run` skips `ServeMetrics`: `Run` starts a
+   manager, which already serves `/metrics` on `:8080`, and a second
+   listener there fails at startup. API servers also add core's
    `metrics` middleware immediately before `routeresolver` (see
    `pkg/server/middleware/README.md`).
 5. In the chart, every pod that serves metrics:
