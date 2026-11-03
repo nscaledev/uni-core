@@ -289,38 +289,45 @@ func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) erro
 }
 
 // RunWithMetrics serves metrics on bindAddress, as ServeMetrics does, while run
-// does the process's work. When either stops, the other is stopped through its
-// context, so a process whose metrics cannot be served stops, as a manager does
-// when its metrics server fails, and the metrics server never outlives the
-// work. It returns the metrics error if that stopped run, and otherwise run's
-// result. Disabled metrics ("0") do not stop run.
+// does the process's work. If metrics cannot be served, run is stopped through
+// its context, as a manager stops when its metrics server fails. Metrics are
+// served until run returns, including while it stops after ctx is done, so
+// what it records while stopping is served too; then the metrics server is
+// stopped, and RunWithMetrics returns once it has. It returns the metrics error
+// if that stopped run, and otherwise run's result. Disabled metrics ("0") do
+// not stop run.
 func (o *CoreOptions) RunWithMetrics(ctx context.Context, bindAddress string, run func(context.Context) error) error {
 	return runWithMetrics(ctx, func(ctx context.Context) error { return o.ServeMetrics(ctx, bindAddress) }, run)
 }
 
 func runWithMetrics(ctx context.Context, serveMetrics, run func(context.Context) error) error {
-	ctx, stop := context.WithCancelCause(ctx)
-	defer stop(nil)
+	runCtx, stopRun := context.WithCancelCause(ctx)
+	defer stopRun(nil)
+
+	// Not stopped by ctx: metrics stop only once run has returned.
+	metricsCtx, stopMetrics := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopMetrics()
 
 	metricsDone := make(chan struct{})
 
 	go func() {
 		defer close(metricsDone)
 
-		if err := serveMetrics(ctx); err != nil {
-			stop(metricsError{err})
+		if err := serveMetrics(metricsCtx); err != nil {
+			stopRun(metricsError{err})
 		}
 	}()
 
-	runErr := run(ctx)
+	runErr := run(runCtx)
 
 	// Only the first cause is kept, so once run has returned, a metrics error
 	// from being stopped cannot replace its result.
-	stop(nil)
+	stopRun(nil)
+	stopMetrics()
 	<-metricsDone
 
 	var failed metricsError
-	if errors.As(context.Cause(ctx), &failed) {
+	if errors.As(context.Cause(runCtx), &failed) {
 		return failed.err
 	}
 
