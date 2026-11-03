@@ -582,6 +582,51 @@ func TestRunWithMetricsStopsOnCancel(t *testing.T) {
 	require.NoError(t, returned(t, errs))
 }
 
+// Cancelling the parent context, as SIGTERM would, stops run, but metrics are
+// served until run has returned, so what it records while stopping is served.
+func TestRunWithMetricsServesMetricsUntilRunReturns(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	metricsCtxs := make(chan context.Context, 1)
+
+	serveMetrics := func(ctx context.Context) error {
+		metricsCtxs <- ctx
+
+		<-ctx.Done()
+
+		return errTestMetricsStopped
+	}
+
+	stopping := make(chan struct{})
+	release := make(chan struct{})
+	errs := make(chan error, 1)
+
+	go func() {
+		errs <- runWithMetrics(ctx, serveMetrics, func(ctx context.Context) error {
+			<-ctx.Done()
+			close(stopping)
+			<-release
+
+			return errTestRun
+		})
+	}()
+
+	metricsCtx := <-metricsCtxs
+
+	cancel()
+	<-stopping
+
+	require.NoError(t, metricsCtx.Err(), "metrics stopped before run returned")
+
+	close(release)
+
+	require.ErrorIs(t, returned(t, errs), errTestRun)
+	require.Error(t, metricsCtx.Err())
+}
+
 // Disabled metrics are not a failure: the work carries on alone.
 func TestRunWithMetricsDisabledRunsAlone(t *testing.T) {
 	t.Parallel()
