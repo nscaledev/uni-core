@@ -77,6 +77,8 @@ Points to be aware of:
 5. In the chart, every pod that serves metrics:
    - names its metrics container port `prometheus`, which the shared
      PodMonitor scrapes;
+   - has a termination grace period that allows for `RunWithMetrics`'
+     final scrape (see its doc comment);
    - drops `OTEL_SERVICE_NAME`, which no longer has any effect.
 
    Remove any ServiceMonitor of the chart's own that scrapes the same

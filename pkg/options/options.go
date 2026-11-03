@@ -24,8 +24,10 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/go-logr/logr"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/spf13/pflag"
 	prombridge "go.opentelemetry.io/contrib/bridges/prometheus"
@@ -40,6 +42,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.22.0"
 	"google.golang.org/protobuf/proto"
 
+	"k8s.io/client-go/rest"
 	klog "k8s.io/klog/v2"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -268,6 +271,11 @@ func (r *serviceRegistry) Gather() ([]*dto.MetricFamily, error) {
 	return families, err
 }
 
+// finalScrapeTimeout bounds how long RunWithMetrics keeps serving metrics after
+// its work returns, waiting for a final scrape. It exceeds the 30s default
+// scrape interval.
+const finalScrapeTimeout = 35 * time.Second
+
 // ServeMetrics serves the controller-runtime registry at /metrics on
 // bindAddress, as a controller-runtime manager does, for processes that don't
 // run a manager. An empty address means :8080, and "0" disables the server.
@@ -276,7 +284,21 @@ func (r *serviceRegistry) Gather() ([]*dto.MetricFamily, error) {
 // Deprecated: Use RunWithMetrics, which stops the process's work when metrics
 // cannot be served.
 func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) error {
-	server, err := metricsserver.NewServer(metricsserver.Options{BindAddress: bindAddress}, nil, nil)
+	return serveMetrics(ctx, bindAddress, 0)
+}
+
+// serveMetrics serves metrics as ServeMetrics does, but once ctx is done keeps
+// serving until a scrape that started after that has succeeded, or timeout has
+// passed.
+func serveMetrics(ctx context.Context, bindAddress string, timeout time.Duration) error {
+	final := newFinalScrape()
+
+	server, err := metricsserver.NewServer(metricsserver.Options{
+		BindAddress: bindAddress,
+		FilterProvider: func(*rest.Config, *http.Client) (metricsserver.Filter, error) {
+			return final.filter, nil
+		},
+	}, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -285,19 +307,90 @@ func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) erro
 		return nil
 	}
 
-	return server.Start(ctx)
+	serveCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
+	defer stop()
+
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-serveCtx.Done():
+			return
+		}
+
+		final.arm()
+
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+
+		select {
+		case <-final.done:
+		case <-timer.C:
+		case <-serveCtx.Done():
+		}
+
+		stop()
+	}()
+
+	return server.Start(serveCtx)
+}
+
+// finalScrape closes done when a scrape that started after arm succeeds.
+type finalScrape struct {
+	armed atomic.Bool
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newFinalScrape() *finalScrape {
+	return &finalScrape{done: make(chan struct{})}
+}
+
+func (f *finalScrape) arm() {
+	f.armed.Store(true)
+}
+
+func (f *finalScrape) filter(_ logr.Logger, handler http.Handler) (http.Handler, error) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		armed := f.armed.Load()
+
+		status := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+
+		handler.ServeHTTP(status, r)
+
+		if armed && status.status == http.StatusOK {
+			f.once.Do(func() { close(f.done) })
+		}
+	}), nil
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
 }
 
 // RunWithMetrics serves metrics on bindAddress, as ServeMetrics does, while run
 // does the process's work. If metrics cannot be served, run is stopped through
 // its context, as a manager stops when its metrics server fails. Metrics are
 // served until run returns, including while it stops after ctx is done, so
-// what it records while stopping is served too; then the metrics server is
-// stopped, and RunWithMetrics returns once it has. It returns the metrics error
-// if that stopped run, and otherwise run's result. Disabled metrics ("0") do
-// not stop run.
+// what it records while stopping is served too.
+//
+// After run returns, metrics are served until a scrape that started after that
+// has succeeded, so the last values are collected, or for at most 35s (longer
+// than the default 30s scrape interval). The pod's termination grace period
+// must allow for that on top of run's own shutdown. RunWithMetrics returns
+// once the metrics server has stopped. It returns the metrics error if that
+// stopped run, and otherwise run's result. Disabled metrics ("0") do not stop
+// run.
 func (o *CoreOptions) RunWithMetrics(ctx context.Context, bindAddress string, run func(context.Context) error) error {
-	return runWithMetrics(ctx, func(ctx context.Context) error { return o.ServeMetrics(ctx, bindAddress) }, run)
+	return runWithMetrics(ctx, func(ctx context.Context) error {
+		return serveMetrics(ctx, bindAddress, finalScrapeTimeout)
+	}, run)
 }
 
 func runWithMetrics(ctx context.Context, serveMetrics, run func(context.Context) error) error {
