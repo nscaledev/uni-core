@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	promclient "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/assert"
@@ -417,8 +418,9 @@ func scrape(t *testing.T) string {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 
+	// ServeMetrics doesn't wait for a final scrape.
 	cancel()
-	require.NoError(t, <-errs)
+	require.NoError(t, returned(t, errs))
 
 	return body
 }
@@ -464,6 +466,12 @@ func returned(t *testing.T, errs <-chan error) error {
 	}
 }
 
+// metricsOn serves metrics on addr as RunWithMetrics does, but waits at most
+// timeout for a final scrape.
+func metricsOn(addr string, timeout time.Duration) func(context.Context) error {
+	return func(ctx context.Context) error { return serveMetrics(ctx, addr, timeout) }
+}
+
 // A process whose metrics cannot be served stops: run's context is cancelled
 // and the metrics error is returned.
 func TestRunWithMetricsStopsRunWhenMetricsCannotBeServed(t *testing.T) {
@@ -495,12 +503,10 @@ func TestRunWithMetricsStopsMetricsWhenRunReturns(t *testing.T) {
 	t.Parallel()
 
 	for _, runErr := range []error{errTestRun, nil} {
-		o := &CoreOptions{}
-
 		release := make(chan struct{})
 
 		_, errs := serveOnFreePort(t, func(addr string) error {
-			return o.RunWithMetrics(t.Context(), addr, func(ctx context.Context) error {
+			return runWithMetrics(t.Context(), metricsOn(addr, 0), func(ctx context.Context) error {
 				select {
 				case <-release:
 					return runErr
@@ -567,10 +573,8 @@ func TestRunWithMetricsStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	o := &CoreOptions{}
-
 	_, errs := serveOnFreePort(t, func(addr string) error {
-		return o.RunWithMetrics(ctx, addr, func(ctx context.Context) error {
+		return runWithMetrics(ctx, metricsOn(addr, 0), func(ctx context.Context) error {
 			<-ctx.Done()
 
 			return nil
@@ -625,6 +629,160 @@ func TestRunWithMetricsServesMetricsUntilRunReturns(t *testing.T) {
 
 	require.ErrorIs(t, returned(t, errs), errTestRun)
 	require.Error(t, metricsCtx.Err())
+}
+
+// After its context is done, the server keeps serving until a scrape has
+// collected the last values.
+func TestServeMetricsWaitsForFinalScrape(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	addr, errs := serveOnFreePort(t, func(addr string) error { return serveMetrics(ctx, addr, time.Minute) })
+
+	cancel()
+
+	select {
+	case err := <-errs:
+		require.Fail(t, "returned before the final scrape", "error: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	status, _, err := getMetrics(t.Context(), addr)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+
+	require.NoError(t, returned(t, errs))
+}
+
+func TestServeMetricsStopsWithoutFinalScrape(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	_, errs := serveOnFreePort(t, func(addr string) error { return serveMetrics(ctx, addr, 50*time.Millisecond) })
+
+	cancel()
+
+	require.NoError(t, returned(t, errs))
+}
+
+// A scrape that started before the context was done may have read values from
+// before the work finished, and a failed scrape read nothing, so neither is
+// the final scrape.
+func TestFinalScrapeCountsOnlySuccessAfterArm(t *testing.T) {
+	t.Parallel()
+
+	status := http.StatusOK
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	final := newFinalScrape()
+	handler, err := final.filter(logr.Discard(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+
+		<-release
+		w.WriteHeader(status)
+	}))
+	require.NoError(t, err)
+
+	serve := func() {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	}
+
+	finished := make(chan struct{})
+
+	go func() {
+		serve()
+		close(finished)
+	}()
+
+	<-entered
+	final.arm()
+	close(release)
+	<-finished
+
+	assertOpen(t, final.done, "a scrape started before arm")
+
+	status = http.StatusInternalServerError
+
+	serve()
+	assertOpen(t, final.done, "a failed scrape")
+
+	status = http.StatusOK
+
+	serve()
+
+	select {
+	case <-final.done:
+	default:
+		require.Fail(t, "a successful scrape after arm is the final scrape")
+	}
+}
+
+func assertOpen(t *testing.T, done <-chan struct{}, msg string) {
+	t.Helper()
+
+	select {
+	case <-done:
+		require.Fail(t, msg+" counted as the final scrape")
+	default:
+	}
+}
+
+// On SIGTERM, metrics are served while the work drains, and after it returns
+// until a scrape has collected what the drain recorded; then RunWithMetrics
+// returns, without waiting out the final scrape timeout.
+func TestRunWithMetricsServesUntilFinalScrapeAfterRun(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stopping := make(chan struct{})
+	release := make(chan struct{})
+
+	addr, errs := serveOnFreePort(t, func(addr string) error {
+		return runWithMetrics(ctx, metricsOn(addr, time.Minute), func(runCtx context.Context) error {
+			<-runCtx.Done()
+
+			// Stopped because the port was taken; serveOnFreePort retries.
+			if ctx.Err() == nil {
+				return nil
+			}
+
+			close(stopping)
+			<-release
+
+			return nil
+		})
+	})
+
+	cancel()
+	<-stopping
+
+	status, _, err := getMetrics(t.Context(), addr)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status, "metrics not served while run stops")
+
+	close(release)
+
+	select {
+	case err := <-errs:
+		require.Fail(t, "returned before the final scrape", "error: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	status, _, err = getMetrics(t.Context(), addr)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, status)
+
+	require.NoError(t, returned(t, errs))
 }
 
 // Disabled metrics are not a failure: the work carries on alone.
