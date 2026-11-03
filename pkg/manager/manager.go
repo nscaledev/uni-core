@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/pflag"
 
 	coreclient "github.com/unikorn-cloud/core/pkg/client"
+	"github.com/unikorn-cloud/core/pkg/manager/health"
 	"github.com/unikorn-cloud/core/pkg/manager/options"
 	"github.com/unikorn-cloud/core/pkg/util"
 
@@ -100,14 +101,12 @@ func getManager(f ControllerFactory) (manager.Manager, error) {
 
 	service := f.Metadata()
 
-	options := manager.Options{
-		Scheme:           scheme,
-		LeaderElection:   true,
-		LeaderElectionID: service.Name,
+	manager, err := manager.New(config, health.Options(scheme, service.Name))
+	if err != nil {
+		return nil, err
 	}
 
-	manager, err := manager.New(config, options)
-	if err != nil {
+	if err := health.AddChecks(manager); err != nil {
 		return nil, err
 	}
 

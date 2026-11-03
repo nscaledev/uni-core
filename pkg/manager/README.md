@@ -23,6 +23,7 @@ In practice `pkg/manager` does three jobs:
 - `ControllerFactory` is the top-level integration contract for controller binaries built on this package.
 - `Run()` and `RunService()` are framework bootstrap code, not generic library helpers. They own flag wiring, logging, OpenTelemetry setup, optional upgrade/initialize hooks, manager creation, controller creation, watch registration, and process startup.
 - `Run()` is deprecated: it pushes metrics through the deprecated `SetupOpenTelemetry()`. `RunService()` calls `SetupTracing()` and `SetupMetrics()` with its service name instead, so metrics are only scraped from the manager's metrics endpoint.
+- Every manager core builds, here and in `messaging/kubernetes`' `Run`, takes its options from [health](./health/health.go): `/healthz` (a ping) and `/readyz` (informer caches synced) on `:8081`, beside metrics on `:8080`. A chart points its liveness and readiness probes there. Without a readiness probe a container is Ready as soon as it starts, so a pod that exits a second later still counts as available and `helm --wait` passes.
 - `Reconciler` is the shared reconcile-policy implementation for manager-style resources. It injects the shared execution context that descendant provisioners depend on before invoking them.
 - That injected context includes:
   - manager access via `pkg/manager`
