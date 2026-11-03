@@ -25,6 +25,9 @@ import (
 	"math"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+
 	unikornv1 "github.com/unikorn-cloud/core/pkg/apis/unikorn/v1alpha1"
 	"github.com/unikorn-cloud/core/pkg/cd"
 	"github.com/unikorn-cloud/core/pkg/cd/argocd"
@@ -77,20 +80,25 @@ type Reconciler struct {
 	// WithPolling sets it once at construction, so the fallback is logged once,
 	// and it is then always positive.
 	requeuePeriod time.Duration
+
+	// transient reports whether a provision failed because a service could not
+	// be reached.  Nil unless WithTransient is set.
+	transient func(error) bool
+
+	// outcomes counts passes by what they returned.
+	outcomes metric.Int64Counter
 }
 
 // ReconcilerOption allows optional reconciler behaviour to be enabled without
 // breaking existing callers of NewReconciler.
 type ReconcilerOption func(*Reconciler)
 
-// WithPolling makes a successful reconcile requeue to its next slot in the
-// controller's requeue period instead of parking until the next watch event,
-// for resources backed by an external system that moves on its own.  It is
-// decided in code, not by a flag, and a non-positive period falls back to
-// constants.DefaultRequeuePeriod.
+// WithPolling makes a reconcile requeue to its next slot in the controller's
+// requeue period instead of parking until the next watch event, for resources
+// backed by an external system that moves on its own.  Only a plain yield is
+// retried sooner; nothing parks.  It is decided in code, not by a flag, and a
+// non-positive period falls back to constants.DefaultRequeuePeriod.
 //
-// A polling controller MUST NOT return Terminal() for external-system state
-// that can recover on its own: nothing wakes a parked resource, so use Yield().
 // A paused resource is not polled, so unpausing MUST generate a watch event.
 // See the README's "Invariants And Guard Rails" section.
 func WithPolling() ReconcilerOption {
@@ -120,6 +128,10 @@ func NewReconciler(options *options.Options, controllerOptions ControllerOptions
 
 	for _, o := range reconcilerOptions {
 		o(r)
+	}
+
+	if r.outcomes == nil {
+		r.outcomes = newOutcomes(otel.GetMeterProvider())
 	}
 
 	return r
@@ -293,46 +305,61 @@ func (r *Reconciler) reconcileNormal(ctx context.Context, provisioner provisione
 	perr := provisioner.Provision(ctx)
 
 	// Update the status conditionally, this will remove transient errors etc.
-	if err := r.handleReconcileCondition(ctx, object, perr, false); err != nil {
-		//nolint:nilerr
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+	err := r.handleReconcileCondition(ctx, object, perr, false)
+	if err != nil {
+		log.Info("failed to update status", "error", err)
 	}
 
-	// If anything went wrong, requeue for another attempt.
+	// A handled failure is logged at info, so one a polling controller
+	// repeats every period does not page anyone.  See the README.
+	switch {
+	case perr == nil:
+		log.Info("reconcile complete")
+	case errors.Is(perr, provisioners.ErrYield) && !errors.Is(perr, provisioners.ErrRecheck):
+	case handled(perr), r.unreachable(perr):
+		log.Info("provisioning failed", "error", perr)
+	default:
+		log.Error(perr, "provisioning failed unexpectedly")
+	}
+
 	// NOTE: DO NOT return an error, and use a constant period or you will
 	// suffer from an exponential back-off and kill performance.
-	if perr != nil {
-		// Terminal dispositions are parked, not retried: requeuing them just
-		// burns the workqueue on a failure that will not self-heal (see the
-		// provisioners package for the ErrTerminal/ErrUserActionRequired
-		// rationale). The condition has already been written above, so the
-		// failure remains visible. Recovery is out-of-band: a spec change wakes
-		// an ErrUserActionRequired resource via the generation-change watch
-		// predicate, while ErrTerminal awaits operator intervention.
-		if provisioners.IsTerminal(perr) {
-			log.Error(perr, "provisioning terminally failed, parking resource")
+	return r.requeue(object, perr, err), nil
+}
 
-			return reconcile.Result{}, nil
+// handled reports whether a failure carries a disposition, meaning the
+// provisioner knew what happened.  A failure without one is a surprise.
+func handled(err error) bool {
+	return errors.Is(err, provisioners.ErrYield) || provisioners.IsTerminal(err)
+}
+
+// requeue decides when to look at the resource again from what the pass
+// returned.  See the README's "Invariants And Guard Rails" section.
+func (r *Reconciler) requeue(object unikornv1.ManagableResourceInterface, perr, statusErr error) reconcile.Result {
+	// Polling: only a plain yield has work in flight that will finish soon.
+	// Everything else, a failed status write included, waits for the slot.
+	if r.requeuePeriod > 0 {
+		if errors.Is(perr, provisioners.ErrYield) && !errors.Is(perr, provisioners.ErrRecheck) {
+			return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}
 		}
 
-		if !errors.Is(perr, provisioners.ErrYield) {
-			log.Error(perr, "provisioning failed unexpectedly")
-		}
-
-		return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}, nil
+		return r.poll(object)
 	}
 
-	log.Info("reconcile complete")
-
-	// Without WithPolling this is the unchanged park.  Terminal dispositions
-	// park above and never poll.
-	if r.requeuePeriod <= 0 {
-		return reconcile.Result{}, nil
+	// Not polling: success and terminal dispositions park until a watch
+	// event, everything else is retried.
+	if statusErr == nil && (perr == nil || provisioners.IsTerminal(perr)) {
+		return reconcile.Result{}
 	}
 
-	// A requeue keeps the priority of the pass it came from, so set it or a
-	// poll could compete with new work.  See the README.
-	return reconcile.Result{RequeueAfter: nextSlot(object.GetUID(), r.requeuePeriod, time.Now()), Priority: ptr.To(handler.LowPriority)}, nil
+	return reconcile.Result{RequeueAfter: constants.DefaultYieldTimeout}
+}
+
+// poll requeues the resource at its next slot.  A requeue keeps the priority of
+// the pass it came from, so set it or a poll could compete with new work.  See
+// the README.
+func (r *Reconciler) poll(object unikornv1.ManagableResourceInterface) reconcile.Result {
+	return reconcile.Result{RequeueAfter: nextSlot(object.GetUID(), r.requeuePeriod, time.Now()), Priority: ptr.To(handler.LowPriority)}
 }
 
 // minimumGapFraction sets the shortest wait nextSlot returns, as a fraction of
@@ -404,6 +431,19 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// changes, never on every poll. Nil when there is no condition yet.
 	prior, _ := unikornv1.GetAvailableCondition(object)
 
+	var perr *provisioners.Error
+
+	typed := errors.As(err, &perr)
+
+	// Could not look is not news about the resource, so leave the condition as
+	// it is, but save what the pass did see.  Not while deleting: a stale
+	// Provisioned would tell dependents a dying resource is ready.
+	if !deprovision && r.unreachable(err) {
+		r.countOutcome(ctx, err, true, deprovision, "")
+
+		return r.manager.GetClient().Status().Update(ctx, object)
+	}
+
 	// Phase 1: derive status and a lifecycle-default reason/message from the
 	// disposition. context.Canceled is the one outcome we deliberately do not
 	// record, leaving the existing condition untouched.
@@ -427,7 +467,7 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 			message = "deprovisioning"
 		}
 	case errors.Is(err, context.Canceled):
-		// Leave it as it is.
+		// Leave it as it is.  Not counted: the process is stopping.
 		return nil
 	default:
 		// Everything else, including the terminal dispositions
@@ -464,11 +504,12 @@ func (r *Reconciler) handleReconcileCondition(ctx context.Context, object unikor
 	// API projection keys off the deletion timestamp (not the reason), and the
 	// requeue decision keys off the disposition, so only the raw condition Reason
 	// would show the blocker — arguably the more useful thing to surface.
-	var perr *provisioners.Error
-	if errors.As(err, &perr) {
+	if typed {
 		reason = perr.Reason()
 		message = perr.Message()
 	}
+
+	r.countOutcome(ctx, err, false, deprovision, reason)
 
 	// Edge: did this transition actually change the surfaced provisioning state?
 	changed := prior == nil ||
