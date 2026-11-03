@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"net/http"
 	"slices"
 	"sync"
 	"time"
@@ -271,6 +272,9 @@ func (r *serviceRegistry) Gather() ([]*dto.MetricFamily, error) {
 // bindAddress, as a controller-runtime manager does, for processes that don't
 // run a manager. An empty address means :8080, and "0" disables the server.
 // It blocks until the context is done.
+//
+// Deprecated: Use RunWithMetrics, which stops the process's work when metrics
+// cannot be served.
 func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) error {
 	server, err := metricsserver.NewServer(metricsserver.Options{BindAddress: bindAddress}, nil, nil)
 	if err != nil {
@@ -282,6 +286,90 @@ func (o *CoreOptions) ServeMetrics(ctx context.Context, bindAddress string) erro
 	}
 
 	return server.Start(ctx)
+}
+
+// RunWithMetrics serves metrics on bindAddress, as ServeMetrics does, while run
+// does the process's work. If metrics cannot be served, run is stopped through
+// its context, as a manager stops when its metrics server fails. Metrics are
+// served until run returns, including while it stops after ctx is done, so
+// what it records while stopping is served too; then the metrics server is
+// stopped, and RunWithMetrics returns once it has. It returns the metrics error
+// if that stopped run, and otherwise run's result. Disabled metrics ("0") do
+// not stop run.
+func (o *CoreOptions) RunWithMetrics(ctx context.Context, bindAddress string, run func(context.Context) error) error {
+	return runWithMetrics(ctx, func(ctx context.Context) error { return o.ServeMetrics(ctx, bindAddress) }, run)
+}
+
+func runWithMetrics(ctx context.Context, serveMetrics, run func(context.Context) error) error {
+	runCtx, stopRun := context.WithCancelCause(ctx)
+	defer stopRun(nil)
+
+	// Not stopped by ctx: metrics stop only once run has returned.
+	metricsCtx, stopMetrics := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopMetrics()
+
+	metricsDone := make(chan struct{})
+
+	go func() {
+		defer close(metricsDone)
+
+		if err := serveMetrics(metricsCtx); err != nil {
+			stopRun(metricsError{err})
+		}
+	}()
+
+	runErr := run(runCtx)
+
+	// Only the first cause is kept, so once run has returned, a metrics error
+	// from being stopped cannot replace its result.
+	stopRun(nil)
+	stopMetrics()
+	<-metricsDone
+
+	var failed metricsError
+	if errors.As(context.Cause(runCtx), &failed) {
+		return failed.err
+	}
+
+	return runErr
+}
+
+// metricsError is the cause when the metrics server stops RunWithMetrics' work.
+type metricsError struct{ err error }
+
+func (e metricsError) Error() string { return e.err.Error() }
+
+// ServeHTTP runs serve, e.g. server.ListenAndServe, until ctx is done, then shuts
+// server down gracefully, waiting up to shutdownTimeout for requests in flight.
+// A server closed by that shutdown is not an error. Call it from the work
+// passed to RunWithMetrics to run an API server alongside its metrics.
+func ServeHTTP(ctx context.Context, server *http.Server, serve func() error, shutdownTimeout time.Duration) error {
+	errs := make(chan error, 1)
+
+	go func() { errs <- serve() }()
+
+	select {
+	case err := <-errs:
+		return ignoreServerClosed(err)
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+
+	return ignoreServerClosed(<-errs)
+}
+
+func ignoreServerClosed(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return err
 }
 
 // ServerOptions are shared across all servers.
