@@ -52,6 +52,8 @@ func headers(h http.Header) http.Header {
 		"User-Agent",
 		"Set-Cookie",
 		"X-Forwarded-For",
+		"X-Principal",
+		"Unikorn-Client-Certificate",
 	}
 
 	headers := h.Clone()
