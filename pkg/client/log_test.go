@@ -17,11 +17,13 @@ limitations under the License.
 package client_test
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -113,7 +115,14 @@ func (s *recordingSink) Error(_ error, message string, kv ...any) {
 }
 
 func TestMain(m *testing.M) {
-	log.SetLogger(logr.New(&recordingSink{recorder: recorder}))
+	// The SPIFFE probe is a manual check.  It prints the log to stderr, because
+	// an operator reads that log to see why no SVID was issued.  Only the
+	// spiffeprobe build does this, because the other tests need the recorder.
+	if logToStderr {
+		log.SetLogger(funcr.New(func(prefix, args string) { fmt.Fprintln(os.Stderr, prefix, args) }, funcr.Options{}))
+	} else {
+		log.SetLogger(logr.New(&recordingSink{recorder: recorder}))
+	}
 
 	os.Exit(m.Run())
 }
