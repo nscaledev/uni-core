@@ -121,8 +121,9 @@ In SPIFFE mode, `TLSClientConfig` returns an error when:
   effect.
 - `<service>-spiffe-server-id` is empty, is not a SPIFFE ID, or is not in the
   trust domain of the SVID of the process.
-- `<service>-spiffe-address` is empty. The host is the public endpoint, and it
-  does not present an SVID.
+- `<service>-spiffe-address` is not an `https` URL with a host. The host is the
+  public endpoint, and it does not present an SVID. The transport uses the TLS
+  configuration only for an `https` URL.
 
 In Secret mode, `TLSClientConfig` returns an error when the peer has
 `<service>-spiffe-address`. A Secret mode client thus never connects to that

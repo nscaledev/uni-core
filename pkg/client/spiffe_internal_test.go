@@ -296,6 +296,9 @@ func TestSPIFFETLSClientConfigRefusesAnIncompleteConfiguration(t *testing.T) {
 		{name: "malformed server ID", source: source, args: []string{"--identity-spiffe-server-id=identity"}},
 		{name: "server ID in another trust domain", source: source, args: []string{"--identity-spiffe-server-id=spiffe://other.org/identity"}},
 		{name: "no SPIFFE address", source: source, args: []string{"--identity-spiffe-address="}},
+		{name: "http SPIFFE address", source: source, args: []string{"--identity-spiffe-address=http://identity.identity.svc:6082"}},
+		{name: "SPIFFE address with no scheme", source: source, args: []string{"--identity-spiffe-address=identity.identity.svc:6082"}},
+		{name: "https SPIFFE address with no host", source: source, args: []string{"--identity-spiffe-address=https:///"}},
 	}
 
 	for _, test := range tests {

@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/go-logr/logr"
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
@@ -136,9 +137,11 @@ func spiffeTLSClientConfig(options *HTTPOptions, clientOptions *HTTPClientOption
 		return nil, fmt.Errorf("%w: --%s %q is not in the trust domain %q of this process", errSPIFFEConfiguration, options.service+"-spiffe-server-id", serverID, svid.ID.TrustDomain())
 	}
 
-	// The host is the public endpoint, which does not present an SVID.
-	if options.spiffeAddress == "" {
-		return nil, fmt.Errorf("%w: --%s must be set with --%s=%s", errSPIFFEConfiguration, options.service+"-spiffe-address", clientOptions.flag("client-certificate-source"), certificateSourceSPIFFE)
+	// The host is the public endpoint, which does not present an SVID.  The
+	// transport uses this TLS configuration only for an https URL.
+	address, err := url.Parse(options.spiffeAddress)
+	if err != nil || address.Scheme != "https" || address.Host == "" {
+		return nil, fmt.Errorf("%w: --%s must be an https URL with --%s=%s, not %q", errSPIFFEConfiguration, options.service+"-spiffe-address", clientOptions.flag("client-certificate-source"), certificateSourceSPIFFE, options.spiffeAddress)
 	}
 
 	config := &tls.Config{
