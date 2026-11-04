@@ -48,6 +48,10 @@ type HTTPOptions struct {
 	secretNamespace string
 	// secretName is the root CA secret of the identity endpoint.
 	secretName string
+	// spiffeServerID is the SPIFFE ID that the endpoint presents in SPIFFE mode.
+	spiffeServerID string
+	// spiffeAddress is the endpoint URL in SPIFFE mode.
+	spiffeAddress string
 }
 
 func NewHTTPOptions(service string) *HTTPOptions {
@@ -56,7 +60,18 @@ func NewHTTPOptions(service string) *HTTPOptions {
 	}
 }
 
+// Host returns the endpoint URL that a client connects to: the SPIFFE address
+// when it is set, and the host otherwise.
 func (o *HTTPOptions) Host() string {
+	if o.spiffeAddress != "" {
+		return o.spiffeAddress
+	}
+
+	return o.host
+}
+
+// PublicHost returns the host, also when a SPIFFE address is set.
+func (o *HTTPOptions) PublicHost() string {
 	return o.host
 }
 
@@ -65,6 +80,8 @@ func (o *HTTPOptions) AddFlags(f *pflag.FlagSet) {
 	f.StringVar(&o.host, o.service+"-host", "", fmt.Sprintf("%s endpoint URL.", o.service))
 	f.StringVar(&o.secretNamespace, o.service+"-ca-secret-namespace", "", fmt.Sprintf("%s endpoint CA certificate secret namespace.", o.service))
 	f.StringVar(&o.secretName, o.service+"-ca-secret-name", "", fmt.Sprintf("%s endpoint CA certificate secret.", o.service))
+	f.StringVar(&o.spiffeServerID, o.service+"-spiffe-server-id", "", fmt.Sprintf("%s endpoint SPIFFE ID. In SPIFFE mode, the client accepts only a server with this ID.", o.service))
+	f.StringVar(&o.spiffeAddress, o.service+"-spiffe-address", "", fmt.Sprintf("%s endpoint URL in SPIFFE mode, for example the in-cluster address of its SPIFFE listener. It replaces the host for connections.", o.service))
 }
 
 // ApplyTLSConfig adds CA certificates to the TLS  configuration if one is specified.
@@ -107,6 +124,12 @@ type HTTPClientOptions struct {
 	secretNamespace string
 	// secretName is the client certificate for the service.
 	secretName string
+	// source is where the client certificate comes from: secret or spiffe.
+	source string
+	// spiffeStartTimeout bounds the wait at start for the first SVID.
+	spiffeStartTimeout time.Duration
+	// spiffe is the SVID source that SetupSPIFFE opens in SPIFFE mode.
+	spiffe spiffeSource
 }
 
 // NewHTTPClientOptions returns options whose flags are prefixed with the service
@@ -132,6 +155,8 @@ func (o *HTTPClientOptions) flag(name string) string {
 func (o *HTTPClientOptions) AddFlags(f *pflag.FlagSet) {
 	f.StringVar(&o.secretNamespace, o.flag("client-certificate-namespace"), o.secretNamespace, "Client certificate secret namespace.")
 	f.StringVar(&o.secretName, o.flag("client-certificate-name"), o.secretName, "Client certificate secret name.")
+	f.StringVar(&o.source, o.flag("client-certificate-source"), certificateSourceSecret, "Source of the client certificate: secret, from the client certificate secret, or spiffe, from the SPIFFE Workload API.")
+	f.DurationVar(&o.spiffeStartTimeout, o.flag("client-spiffe-start-timeout"), 30*time.Second, "Maximum time to wait at start for the first X.509-SVID from the SPIFFE Workload API.")
 
 	// Accepted and ignored: the certificate is reloaded on every handshake.  Deployments
 	// still pass this, and pflag rejects unknown flags, so removing it stops those pods
@@ -371,6 +396,19 @@ func VerifyAndDecode(data any, payload string, certificate *x509.Certificate) er
 
 // TLSClientConfig is a helper to create a TLS client configuration.
 func TLSClientConfig(ctx context.Context, cli client.Client, options *HTTPOptions, clientOptions *HTTPClientOptions) (*tls.Config, error) {
+	spiffe, err := clientOptions.spiffeMode()
+	if err != nil {
+		return nil, err
+	}
+
+	if spiffe {
+		return spiffeTLSClientConfig(options, clientOptions)
+	}
+
+	if options.spiffeAddress != "" {
+		return nil, fmt.Errorf("%w: --%s needs --%s=%s", errSPIFFEConfiguration, options.service+"-spiffe-address", clientOptions.flag("client-certificate-source"), certificateSourceSPIFFE)
+	}
+
 	config := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 	}
