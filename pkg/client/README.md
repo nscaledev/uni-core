@@ -82,6 +82,77 @@ Each load runs on the caller's context, capped by a timeout. At construction
 that is the setup context; on a handshake it is the handshake's own, so a caller
 that has already given up is not held here.
 
+## SPIFFE client certificate source
+
+A client can get its certificate, an X.509-SVID, from the SPIFFE Workload API
+in place of a `kubernetes.io/tls` Secret. Four flags control this:
+
+| flag | default | meaning |
+| --- | --- | --- |
+| `client-certificate-source` | `secret` | `secret` loads the certificate from the Secret. `spiffe` gets the SVID from the Workload API. |
+| `client-spiffe-start-timeout` | `30s` | The maximum wait at start for the first SVID. |
+| `<service>-spiffe-server-id` | empty | The SPIFFE ID that the server must present. |
+| `<service>-spiffe-address` | empty | The endpoint URL in SPIFFE mode, for example the in-cluster address of the SPIFFE listener of the peer. |
+
+The first two flags take the prefix of `NewHTTPClientOptions`, as the other
+client certificate flags do. The last two are per peer and take the prefix of
+`NewHTTPOptions`, for example `--identity-spiffe-server-id`.
+
+The process calls `SetupSPIFFE` at start and `Close` at exit. In Secret mode,
+both do nothing. Every binary that adds the client flags has
+`--client-certificate-source`, so a binary that sets it to `spiffe` must call
+`SetupSPIFFE`. Without the call, `TLSClientConfig` returns the error "the SVID
+source is not open". `SetupSPIFFE` reads the socket address from
+`SPIFFE_ENDPOINT_SOCKET`. A library cannot exit, so each rule that follows
+returns an error, and the process exits.
+
+`SetupSPIFFE` returns an error when:
+
+- The source is not `secret`, `spiffe` or empty. An empty value, as in
+  `--client-certificate-source=`, is Secret mode.
+- The source is `spiffe` and `client-certificate-name` or
+  `client-certificate-namespace` is also set. A process has one source for its
+  client certificate.
+- The source is `spiffe` and an earlier call already opened the SVID source.
+- No SVID arrives before the start timeout. A service can set the flag in its
+  own deployment, so an environment can change it with no code change.
+
+In SPIFFE mode, `TLSClientConfig` returns an error when:
+
+- `SetupSPIFFE` did not open the source.
+- The peer has `<service>-ca-secret-name` or `<service>-ca-secret-namespace`.
+  The trust bundle of the Workload API replaces the CA, so these flags have no
+  effect.
+- `<service>-spiffe-server-id` is empty, is not a SPIFFE ID, or is not in the
+  trust domain of the SVID of the process.
+- `<service>-spiffe-address` is not of the form `https://host[:port][/path]`.
+  The error does not show the value. The host is the public endpoint, and it
+  does not present an SVID. The transport uses the TLS configuration only for
+  an `https` URL.
+
+In Secret mode, `TLSClientConfig` returns an error when the peer has
+`<service>-spiffe-address`. A Secret mode client thus never connects to that
+address.
+
+With a valid configuration, the client presents its SVID. It accepts only a
+server with the SPIFFE ID of the peer (`tlsconfig.AuthorizeID`). Each handshake
+reads the current SVID and trust bundle from the source. A renewed SVID thus
+takes effect on the next connection, with no restart. The minimum version is
+TLS 1.3, as in Secret mode.
+
+`Host()` returns `<service>-spiffe-address` when it is set, and
+`<service>-host` when it is not. As a result, every client connects to the
+SPIFFE address with no change to its code. For the same reason, a value that a
+service derives from `Host()` changes when the address is set. `PublicHost()`
+always returns `<service>-host`. A service uses it for a URL that it publishes
+to its own clients, for example the URL of an authorization server.
+
+`EncodeAndSign` reads the Secret, so it fails in SPIFFE mode.
+
+The log of go-spiffe goes to the controller-runtime log with the name `spiffe`.
+Its debug and warning lines are info lines, so the log shows when the Workload
+API watch starts.
+
 ## Caveats
 
 - The package name is misleading. `pkg/client` conflates unrelated responsibilities for legacy reasons and should be split into more intuitive packages.
