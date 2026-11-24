@@ -111,13 +111,6 @@ type HealthStatusReason string
 // indexed in the database.
 type KubernetesLabelValue = string
 
-// NoReservedTags Constrain tags to not have reserved names.
-type NoReservedTags struct {
-	Tags *[]struct {
-		Name *interface{} `json:"name,omitempty"`
-	} `json:"tags,omitempty"`
-}
-
 // OpenidProtectedResource OpenID athentication server discovery configuration.
 type OpenidProtectedResource struct {
 	// AuthorizationServers List of authorization servers that can grant access to the resource.
