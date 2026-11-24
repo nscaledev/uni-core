@@ -14,6 +14,16 @@ UNI reserves nothing. Every prefix is deployment configuration, set with `--rese
 - `OnUpdate`: under a prefix the caller owns, the request decides, so omitting a tag removes it. Under one it does not own, the stored tags are kept and the request is ignored, with no error.
 - Reads are unchanged.
 
+## Changing The Configuration
+
+Stored tags are never rewritten, so changing the flag changes only who may write them from then on.
+
+- **Adding a prefix.** Existing tags under it stay as they are. Non-owners can no longer change or remove them, and a create that carries one is refused. A tag a user set by hand before the prefix was reserved becomes frozen for that user; only an owner, or a direct Kubernetes write, can change it. Scan for such tags before reserving. Grant the owner its endpoint, for both `create` and `update`, first: without `create` its creates are refused, and without `update` its tag changes are ignored silently.
+- **Removing a prefix.** Its tags become ordinary user tags again, which anyone who may update the resource can change or delete. Nothing is rewritten, so removing a prefix is the rollback.
+- **Changing a prefix's endpoint.** Ownership moves to the new endpoint's holders.
+
+A change takes effect when the server restarts with the new flag. During a rolling update, old and new replicas briefly disagree. Each service enforces only its own flag, so a prefix reserved on one service and not another is protected only on the first.
+
 ## Invariants And Guard Rails
 
 - Call `Validate` at startup. It refuses empty prefixes, empty endpoints, and prefixes where one starts with another, so a tag matches at most one prefix.
