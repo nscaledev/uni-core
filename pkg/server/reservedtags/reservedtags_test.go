@@ -30,22 +30,22 @@ import (
 )
 
 const (
-	k8sPrefix   = "k8s.example.org/"
-	k8sEndpoint = "k8s:tags"
+	k8sPrefix     = "k8s.example.org/"
+	k8sPermission = "k8s:tags"
 )
 
 func options() *reservedtags.Options {
 	return &reservedtags.Options{
 		Prefixes: map[string]string{
-			k8sPrefix:            k8sEndpoint,
+			k8sPrefix:            k8sPermission,
 			"infra.example.org/": "infra:tags",
 		},
 	}
 }
 
-func holding(endpoints ...string) reservedtags.Holds {
-	return func(endpoint string) bool {
-		return slices.Contains(endpoints, endpoint)
+func holding(permissions ...string) reservedtags.Holds {
+	return func(permission string) bool {
+		return slices.Contains(permissions, permission)
 	}
 }
 
@@ -82,11 +82,11 @@ func TestValidate(t *testing.T) {
 		{name: "none", prefixes: nil},
 		{name: "disjoint", prefixes: map[string]string{"a/": "x", "b/": "x"}},
 		{name: "empty prefix", prefixes: map[string]string{"": "x"}, err: reservedtags.ErrEmptyPrefix},
-		{name: "empty endpoint", prefixes: map[string]string{"a/": ""}, err: reservedtags.ErrEmptyEndpoint},
+		{name: "empty permission", prefixes: map[string]string{"a/": ""}, err: reservedtags.ErrEmptyPermission},
 		{name: "nested", prefixes: map[string]string{"a/": "x", "a/b/": "y"}, err: reservedtags.ErrOverlap},
 		{name: "case variant", prefixes: map[string]string{"a/": "x", "A/": "x"}, err: reservedtags.ErrOverlap},
 		{name: "leading space", prefixes: map[string]string{" a/": "x"}, err: reservedtags.ErrMalformed},
-		{name: "trailing space endpoint", prefixes: map[string]string{"a/": "x "}, err: reservedtags.ErrMalformed},
+		{name: "trailing space permission", prefixes: map[string]string{"a/": "x "}, err: reservedtags.ErrMalformed},
 		{name: "prefix split at =", prefixes: map[string]string{"a": "b/=x"}, err: reservedtags.ErrMalformed},
 	}
 
@@ -116,10 +116,10 @@ func TestOnCreate(t *testing.T) {
 	}{
 		{name: "no tags", tags: nil, holds: holding()},
 		{name: "unreserved", tags: tags("env", "prod"), holds: holding()},
-		{name: "owner", tags: tags("k8s.example.org/cluster", "c1"), holds: holding(k8sEndpoint)},
+		{name: "owner", tags: tags("k8s.example.org/cluster", "c1"), holds: holding(k8sPermission)},
 		{name: "non-owner", tags: tags("env", "prod", "k8s.example.org/cluster", "c1"), holds: holding(), denied: "k8s.example.org/cluster"},
 		{name: "case folded", tags: tags("K8S.Example.org/cluster", "c1"), holds: holding(), denied: "K8S.Example.org/cluster"},
-		{name: "owns one prefix only", tags: tags("k8s.example.org/a", "1", "infra.example.org/b", "2"), holds: holding(k8sEndpoint), denied: "infra.example.org/b"},
+		{name: "owns one prefix only", tags: tags("k8s.example.org/a", "1", "infra.example.org/b", "2"), holds: holding(k8sPermission), denied: "infra.example.org/b"},
 		{name: "bare prefix is reserved", tags: tags("k8s.example.org/", "1"), holds: holding(), denied: "k8s.example.org/"},
 		{name: "shorter than prefix", tags: tags("k8s", "1"), holds: holding()},
 		{name: "kelvin sign folds to k", tags: tags("\u212a8s.example.org/x", "1"), holds: holding(), denied: "8s.example.org/x"},
@@ -186,19 +186,19 @@ func TestOnUpdate(t *testing.T) {
 		{
 			name:     "owner removes by omission",
 			incoming: tags("env", "prod"),
-			holds:    holding(k8sEndpoint, "infra:tags"),
+			holds:    holding(k8sPermission, "infra:tags"),
 			want:     tags("env", "prod"),
 		},
 		{
 			name:     "owner changes a value",
 			incoming: tags("k8s.example.org/cluster", "c2", "infra.example.org/pool", "p1"),
-			holds:    holding(k8sEndpoint, "infra:tags"),
+			holds:    holding(k8sPermission, "infra:tags"),
 			want:     tags("k8s.example.org/cluster", "c2", "infra.example.org/pool", "p1"),
 		},
 		{
 			name:     "owns one prefix, judged separately",
 			incoming: tags("k8s.example.org/cluster", "c2", "infra.example.org/pool", "evil"),
-			holds:    holding(k8sEndpoint),
+			holds:    holding(k8sPermission),
 			want:     tags("k8s.example.org/cluster", "c2", "infra.example.org/pool", "p1"),
 		},
 	}

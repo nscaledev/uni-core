@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package reservedtags lets an operator reserve tag prefixes for the holders
-// of an RBAC endpoint. See README.md.
+// of an RBAC permission. See README.md.
 package reservedtags
 
 import (
@@ -34,37 +34,37 @@ import (
 )
 
 var (
-	ErrEmptyPrefix   = errors.New("reserved tag prefix is empty")
-	ErrEmptyEndpoint = errors.New("reserved tag prefix has no endpoint")
-	ErrOverlap       = errors.New("reserved tag prefixes overlap")
-	ErrMalformed     = errors.New("reserved tag prefix is malformed")
+	ErrEmptyPrefix     = errors.New("reserved tag prefix is empty")
+	ErrEmptyPermission = errors.New("reserved tag prefix has no permission")
+	ErrOverlap         = errors.New("reserved tag prefixes overlap")
+	ErrMalformed       = errors.New("reserved tag prefix is malformed")
 )
 
-// Options maps each reserved tag prefix to the RBAC endpoint whose holders own it.
+// Options maps each reserved tag prefix to the RBAC permission whose holders own it.
 type Options struct {
 	Prefixes map[string]string
 }
 
 func (o *Options) AddFlags(f *pflag.FlagSet) {
-	f.StringToStringVar(&o.Prefixes, "reserved-tag-prefixes", nil, "Reserved tag prefixes, as prefix=endpoint pairs. Only callers holding the endpoint may write tags under the prefix.")
+	f.StringToStringVar(&o.Prefixes, "reserved-tag-prefixes", nil, "Reserved tag prefixes, as prefix=permission pairs, where permission is an Identity RBAC permission (endpoint) name such as example:tags. Only callers holding the permission may write tags under the prefix.")
 }
 
 // Validate refuses empty or malformed entries, and prefixes that overlap, so
 // no tag can match more than one prefix.
 func (o *Options) Validate() error {
-	for prefix, endpoint := range o.Prefixes {
+	for prefix, permission := range o.Prefixes {
 		if prefix == "" {
 			return ErrEmptyPrefix
 		}
 
-		if endpoint == "" {
-			return fmt.Errorf("%w: %q", ErrEmptyEndpoint, prefix)
+		if permission == "" {
+			return fmt.Errorf("%w: %q", ErrEmptyPermission, prefix)
 		}
 
 		// Catches a space after a comma, or a prefix containing "=" that
 		// pflag split early, either of which would reserve the wrong thing.
-		if strings.TrimSpace(prefix) != prefix || strings.TrimSpace(endpoint) != endpoint || strings.Contains(endpoint, "=") {
-			return fmt.Errorf("%w: %q=%q", ErrMalformed, prefix, endpoint)
+		if strings.TrimSpace(prefix) != prefix || strings.TrimSpace(permission) != permission || strings.Contains(permission, "=") {
+			return fmt.Errorf("%w: %q=%q", ErrMalformed, prefix, permission)
 		}
 
 		for other := range o.Prefixes {
@@ -77,17 +77,17 @@ func (o *Options) Validate() error {
 	return nil
 }
 
-// Holds reports whether the caller holds the endpoint for the operation being
+// Holds reports whether the caller holds the permission for the operation being
 // served, at the scope of the resource being written. It must not record a
 // refusal: a false answer is a normal outcome, not a denied request.
-type Holds func(endpoint string) bool
+type Holds func(permission string) bool
 
 // OnCreate refuses, with 403, a create carrying a tag under a prefix the
 // caller does not own.
 func (o *Options) OnCreate(ctx context.Context, tags unikornv1core.TagList, holds Holds) error {
 	for _, tag := range tags {
-		prefix, endpoint, ok := o.match(tag.Name)
-		if !ok || holds(endpoint) {
+		prefix, permission, ok := o.match(tag.Name)
+		if !ok || holds(permission) {
 			continue
 		}
 
@@ -114,8 +114,8 @@ func (o *Options) OnUpdate(ctx context.Context, stored, incoming unikornv1core.T
 	changed := map[string]bool{}
 
 	for _, tag := range incoming {
-		prefix, endpoint, ok := o.match(tag.Name)
-		if !ok || holds(endpoint) {
+		prefix, permission, ok := o.match(tag.Name)
+		if !ok || holds(permission) {
 			out = append(out, tag)
 			continue
 		}
@@ -126,7 +126,7 @@ func (o *Options) OnUpdate(ctx context.Context, stored, incoming unikornv1core.T
 	}
 
 	for _, tag := range stored {
-		if _, endpoint, ok := o.match(tag.Name); ok && !holds(endpoint) {
+		if _, permission, ok := o.match(tag.Name); ok && !holds(permission) {
 			out = append(out, tag)
 		}
 	}
@@ -138,12 +138,12 @@ func (o *Options) OnUpdate(ctx context.Context, stored, incoming unikornv1core.T
 	return out
 }
 
-// match returns the reserved prefix the tag name falls under, and its endpoint.
+// match returns the reserved prefix the tag name falls under, and its permission.
 // Validate guarantees at most one prefix matches.
 func (o *Options) match(name string) (string, string, bool) {
-	for prefix, endpoint := range o.Prefixes {
+	for prefix, permission := range o.Prefixes {
 		if hasPrefixFold(name, prefix) {
-			return prefix, endpoint, true
+			return prefix, permission, true
 		}
 	}
 
