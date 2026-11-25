@@ -39,6 +39,7 @@ The rule of thumb: if a duplicate of this resource would be silently wrong — n
 - [conversion](./conversion/README.md): shared generic conversion layer for common resource metadata, status, and tag translation between Kubernetes objects and API envelopes.
 - [errors](./errors/README.md): canonical user-facing API error contract and response writer for normal APIs, plus propagation helpers for remote API failures.
 - [middleware](./middleware/README.md): canonical shared middleware stack for platform APIs, including route resolution, CORS, logging, tracing, timeout, and response capture support.
+- [reservedtags](./reservedtags/README.md): operator-reserved tag prefixes, writable only by holders of a configured RBAC endpoint.
 - [saga](./saga/README.md): synchronous in-process best-effort rollback coordinator for multi-step handler workflows.
 - [util](./util/README.md): small server-boundary helper bucket for response writing, request-body decoding, ownership concealment checks, and tag parsing.
 
